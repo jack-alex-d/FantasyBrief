@@ -300,6 +300,14 @@ def _build_milb_section(
     lines.append("  MINOR LEAGUE REPORT")
     lines.append("-" * 70)
 
+    # Sort MiLB players by estimated fantasy score too
+    milb_players.sort(
+        key=lambda p: batter_sort_score(milb_stats.get(p.get("name", ""), {}))
+        if milb_stats.get(p.get("name", ""), {}).get("type") == "batter"
+        else pitcher_sort_score(milb_stats.get(p.get("name", ""), {})),
+        reverse=True,
+    )
+
     for player in milb_players:
         name = player.get("name", "Unknown")
         team = player.get("team", "")
@@ -308,8 +316,13 @@ def _build_milb_section(
         level = m.get("level", "MiLB")
         game = m.get("game", "")
         stats = m.get("stats", {})
-        player_type = m.get("type", "")
-        stat_line = stats.get("batting", stats.get("pitching", stats.get("summary", "")))
+        ptype = m.get("type", "")
+        if ptype == "batter":
+            stat_line = format_batter_line(stats)
+        elif ptype == "pitcher":
+            stat_line = format_pitcher_line(stats)
+        else:
+            stat_line = stats.get("summary", "")
         lines.append(f"\n  {name} ({pos}, {team}) [{level}] -- {game}")
         if stat_line:
             lines.append(f"    {stat_line}")

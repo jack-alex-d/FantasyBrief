@@ -280,29 +280,95 @@ def compute_pitcher_metrics(statcast_df: pd.DataFrame) -> dict:
     return metrics
 
 
-def _get_affiliate_team_ids(roster: list[dict]) -> set[int]:
-    """Get all MiLB team IDs affiliated with MLB orgs on the roster."""
-    # Collect unique MLB parent org names from roster
-    org_names = {p.get("team_full", "") for p in roster if p.get("team_full")}
-    if not org_names:
-        return set()
+_MILB_SPORT_IDS = "11,12,13,14,16"
+_SPORT_LEVEL_NAMES = {11: "AAA", 12: "AA", 13: "A+", 14: "A", 16: "Rookie/Complex"}
 
+
+def _resolve_mlbam_id(player_name: str) -> int | None:
+    """Resolve a player name to MLBAM ID via people search (finds MiLB prospects)."""
     try:
         resp = requests.get(
-            "https://statsapi.mlb.com/api/v1/teams",
-            params={"sportIds": "11,12,13,14,16", "season": date.today().year},
+            "https://statsapi.mlb.com/api/v1/people/search",
+            params={"names": player_name, "sportIds": f"1,{_MILB_SPORT_IDS}"},
             timeout=10,
         )
-        teams = resp.json().get("teams", [])
+        results = resp.json().get("searchResults", [])
+        if results:
+            person = results[0].get("person", results[0])
+            return person.get("id")
     except Exception:
-        return set()
+        pass
+    return None
 
-    affiliate_ids = set()
-    for team in teams:
-        parent = team.get("parentOrgName", "")
-        if parent in org_names:
-            affiliate_ids.add(team["id"])
-    return affiliate_ids
+
+def _fetch_milb_game_log(player_name: str, mlbam_id: int, target_date: date) -> dict | None:
+    """Fetch a player's MiLB game log for target_date. Returns stat dict or None."""
+    date_str = target_date.strftime("%Y-%m-%d")
+    season = target_date.year
+
+    for group in ["hitting", "pitching"]:
+        for sport_id in [11, 12, 13, 14, 16]:
+            try:
+                resp = requests.get(
+                    f"https://statsapi.mlb.com/api/v1/people/{mlbam_id}/stats",
+                    params={"stats": "gameLog", "season": season, "group": group, "sportId": sport_id},
+                    timeout=10,
+                )
+                for stat_group in resp.json().get("stats", []):
+                    for split in stat_group.get("splits", []):
+                        if split.get("date") == date_str:
+                            s = split.get("stat", {})
+                            team = split.get("team", {})
+                            opponent = split.get("opponent", {})
+                            level = _SPORT_LEVEL_NAMES.get(sport_id, "MiLB")
+                            is_home = split.get("isHome", False)
+                            if is_home:
+                                game_str = f"{opponent.get('name', '?')} @ {team.get('name', '?')}"
+                            else:
+                                game_str = f"{team.get('name', '?')} @ {opponent.get('name', '?')}"
+
+                            if group == "hitting":
+                                return {
+                                    "type": "batter",
+                                    "level": level,
+                                    "game": game_str,
+                                    "stats": {
+                                        "ab": str(s.get("atBats", 0)),
+                                        "h": str(s.get("hits", 0)),
+                                        "r": str(s.get("runs", 0)),
+                                        "doubles": str(s.get("doubles", 0)),
+                                        "triples": str(s.get("triples", 0)),
+                                        "hr": str(s.get("homeRuns", 0)),
+                                        "rbi": str(s.get("rbi", 0)),
+                                        "bb": str(s.get("baseOnBalls", 0)),
+                                        "k": str(s.get("strikeOuts", 0)),
+                                        "sb": str(s.get("stolenBases", 0)),
+                                        "hbp": str(s.get("hitByPitch", 0)),
+                                        "summary": s.get("summary", ""),
+                                    },
+                                }
+                            else:
+                                return {
+                                    "type": "pitcher",
+                                    "level": level,
+                                    "game": game_str,
+                                    "stats": {
+                                        "ip": str(s.get("inningsPitched", "0")),
+                                        "h": str(s.get("hits", 0)),
+                                        "r": str(s.get("runs", 0)),
+                                        "er": str(s.get("earnedRuns", 0)),
+                                        "bb": str(s.get("baseOnBalls", 0)),
+                                        "k": str(s.get("strikeOuts", 0)),
+                                        "hr": str(s.get("homeRuns", 0)),
+                                        "pitches": str(s.get("numberOfPitches", 0)),
+                                        "strikes": str(s.get("strikes", 0)),
+                                        "note": s.get("note", ""),
+                                        "summary": s.get("summary", ""),
+                                    },
+                                }
+            except Exception:
+                continue
+    return None
 
 
 def get_milb_player_stats_batch(
@@ -310,83 +376,41 @@ def get_milb_player_stats_batch(
     player_names: list[str],
     target_date: date | None = None,
 ) -> dict[str, dict]:
-    """Batch-find MiLB game stats across all levels.
+    """Player-first MiLB stats lookup across all levels.
 
-    Efficient: fetches affiliate team IDs first, then only scans games involving
-    those teams. Covers AAA, AA, A+, A, and Rookie/Complex/DSL leagues.
+    For each DNP player: resolve MLBAM ID via people search, then check their
+    game log for the target date. No box score scanning needed.
+    All levels covered: AAA, AA, A+, A, Rookie/Complex/DSL.
+    Parallelized for speed.
     """
     if target_date is None:
         target_date = date.today() - timedelta(days=1)
-    date_str = target_date.strftime("%m/%d/%Y")
-
-    # Build name lookup
-    name_lookup: dict[str, list[str]] = {}
-    for name in player_names:
-        parts = name.lower().split()
-        if parts:
-            name_lookup.setdefault(parts[-1], []).append(name)
-
-    if not name_lookup:
+    if not player_names:
         return {}
 
-    # Get affiliate team IDs so we only fetch relevant box scores
-    affiliate_ids = _get_affiliate_team_ids(roster)
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _lookup_player(name: str) -> tuple[str, dict | None]:
+        # First try people search (finds MiLB prospects)
+        mlbam_id = _resolve_mlbam_id(name)
+        if not mlbam_id:
+            # Fallback: try statsapi.lookup_player
+            mlbam_id = lookup_mlbam_id(name)
+        if not mlbam_id:
+            return name, None
+        result = _fetch_milb_game_log(name, mlbam_id, target_date)
+        return name, result
 
     results = {}
-    levels = [(11, "AAA"), (12, "AA"), (13, "A+"), (14, "A"), (16, "Rookie/Complex")]
-
-    for sport_id, level in levels:
-        try:
-            games = statsapi.schedule(date=date_str, sportId=sport_id)
-        except Exception:
-            continue
-        final_games = [g for g in games if g.get("status") == "Final"]
-
-        for game in final_games:
-            # Skip games not involving our affiliates (if we have the mapping)
-            if affiliate_ids:
-                away_id = game.get("away_id", 0)
-                home_id = game.get("home_id", 0)
-                if away_id not in affiliate_ids and home_id not in affiliate_ids:
-                    continue
-
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {pool.submit(_lookup_player, name): name for name in player_names}
+        for future in as_completed(futures):
             try:
-                box = get_box_score(game["game_id"])
+                name, data = future.result(timeout=30)
+                if data:
+                    results[name] = data
             except Exception:
                 continue
-
-            game_str = f"{game.get('away_name', '')} @ {game.get('home_name', '')}"
-            for side in ["away", "home"]:
-                for batter in box.get(f"{side}Batters", []):
-                    if not isinstance(batter, dict) or batter.get("personId", 0) == 0:
-                        continue
-                    last = batter.get("name", "").lower().split()[-1] if batter.get("name") else ""
-                    if last not in name_lookup:
-                        continue
-                    for roster_name in name_lookup[last]:
-                        if roster_name not in results:
-                            results[roster_name] = {
-                                "type": "batter",
-                                "level": level,
-                                "game": game_str,
-                                "stats": batter,
-                            }
-                            break
-                for pitcher in box.get(f"{side}Pitchers", []):
-                    if not isinstance(pitcher, dict) or pitcher.get("personId", 0) == 0:
-                        continue
-                    last = pitcher.get("name", "").lower().split()[-1] if pitcher.get("name") else ""
-                    if last not in name_lookup:
-                        continue
-                    for roster_name in name_lookup[last]:
-                        if roster_name not in results:
-                            results[roster_name] = {
-                                "type": "pitcher",
-                                "level": level,
-                                "game": game_str,
-                                "stats": pitcher,
-                            }
-                            break
     return results
 
 
