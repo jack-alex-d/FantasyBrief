@@ -95,6 +95,7 @@ def _build_hitter_section(
         return lines
 
     played = [p for p in hitters if p.get("name") in box_scores]
+    played.sort(key=lambda p: _batter_sort_score(box_scores.get(p.get("name", ""), {})), reverse=True)
     dnp = [p for p in hitters if p.get("name") not in box_scores]
 
     for player in played:
@@ -207,6 +208,7 @@ def _build_pitcher_section(
         return lines
 
     played = [p for p in pitchers if p.get("name") in box_scores]
+    played.sort(key=lambda p: _pitcher_sort_score(box_scores.get(p.get("name", ""), {})), reverse=True)
     dnp = [p for p in pitchers if p.get("name") not in box_scores]
 
     for player in played:
@@ -552,6 +554,43 @@ def _build_matchup_preview(probable_pitchers: list[dict], roster: list[dict]) ->
 # ---------------------------------------------------------------------------
 # HELPERS
 # ---------------------------------------------------------------------------
+
+def _batter_sort_score(box: dict) -> float:
+    """Rough fantasy point estimate for sorting hitters (best performance first)."""
+    s = box.get("stats", {})
+    try:
+        return (
+            int(s.get("h", 0)) * 1
+            + int(s.get("doubles", 0)) * 1
+            + int(s.get("triples", 0)) * 2
+            + int(s.get("hr", 0)) * 3
+            + int(s.get("rbi", 0)) * 1
+            + int(s.get("r", 0)) * 1
+            + int(s.get("bb", 0)) * 0.5
+            + int(s.get("sb", 0)) * 2
+            - int(s.get("k", 0)) * 0.5
+        )
+    except (ValueError, TypeError):
+        return 0
+
+
+def _pitcher_sort_score(box: dict) -> float:
+    """Rough fantasy point estimate for sorting pitchers (best performance first)."""
+    s = box.get("stats", {})
+    try:
+        ip = float(s.get("ip", 0))
+        return (
+            ip * 3
+            + int(s.get("k", 0)) * 1
+            - int(s.get("er", 0)) * 2
+            - int(s.get("bb", 0)) * 0.5
+            - int(s.get("h", 0)) * 0.5
+            + (5 if "W" in s.get("note", "") else 0)
+            - (3 if "L" in s.get("note", "") else 0)
+        )
+    except (ValueError, TypeError):
+        return 0
+
 
 def _is_hitter(player: dict) -> bool:
     if "is_pitcher" in player:

@@ -110,6 +110,7 @@ def _html_header(team_name: str, target_date: date) -> str:
 def _html_hitters(roster: list[dict], box_scores: dict, statcast: dict) -> str:
     hitters = [p for p in roster if not p.get("is_pitcher", False)]
     played = [p for p in hitters if p.get("name") in box_scores]
+    played.sort(key=lambda p: _batter_sort_score(box_scores.get(p.get("name", ""), {})), reverse=True)
     dnp = [p for p in hitters if p.get("name") not in box_scores]
 
     if not played and not dnp:
@@ -176,6 +177,7 @@ def _html_batter_statcast(metrics: dict) -> str:
 def _html_pitchers(roster: list[dict], box_scores: dict, statcast: dict) -> str:
     pitchers = [p for p in roster if p.get("is_pitcher", False)]
     played = [p for p in pitchers if p.get("name") in box_scores]
+    played.sort(key=lambda p: _pitcher_sort_score(box_scores.get(p.get("name", ""), {})), reverse=True)
     dnp = [p for p in pitchers if p.get("name") not in box_scores]
 
     if not played and not dnp:
@@ -419,6 +421,34 @@ def _metric_class(key: str, val: float, thresholds: dict) -> str:
         if val >= poor_thresh:
             return "poor"
     return "good"
+
+
+def _batter_sort_score(box: dict) -> float:
+    s = box.get("stats", {})
+    try:
+        return (
+            int(s.get("h", 0)) * 1 + int(s.get("doubles", 0)) * 1
+            + int(s.get("triples", 0)) * 2 + int(s.get("hr", 0)) * 3
+            + int(s.get("rbi", 0)) * 1 + int(s.get("r", 0)) * 1
+            + int(s.get("bb", 0)) * 0.5 + int(s.get("sb", 0)) * 2
+            - int(s.get("k", 0)) * 0.5
+        )
+    except (ValueError, TypeError):
+        return 0
+
+
+def _pitcher_sort_score(box: dict) -> float:
+    s = box.get("stats", {})
+    try:
+        return (
+            float(s.get("ip", 0)) * 3 + int(s.get("k", 0)) * 1
+            - int(s.get("er", 0)) * 2 - int(s.get("bb", 0)) * 0.5
+            - int(s.get("h", 0)) * 0.5
+            + (5 if "W" in s.get("note", "") else 0)
+            - (3 if "L" in s.get("note", "") else 0)
+        )
+    except (ValueError, TypeError):
+        return 0
 
 
 def _esc(text: str) -> str:

@@ -209,43 +209,81 @@ def main():
 
     # Build HTML version + send email if requested
     if send_email:
-        # Collect the news data that brief_builder computed
-        from lib.brief_builder import _is_recent_news, _is_injury_flag, _parse_news_time
-        fantrax_news_for_email = []
-        injury_flags_for_email = []
-        rss_covered = {item.get("matched_player", "") for item in relevant_news}
-        for p in roster:
-            pname = p.get("name", "?")
-            if pname in rss_covered:
-                continue
-            for note in p.get("news", []):
-                if _is_recent_news(note, target_date):
-                    fantrax_news_for_email.append((pname, note))
-                elif _is_injury_flag(note):
-                    pass  # collected below
-        for p in roster:
-            for note in p.get("news", []):
-                if _is_injury_flag(note):
-                    injury_flags_for_email.append((p.get("name", "?"), note))
+        # Skip email if no games and no roster (nothing to report)
+        if not games and not roster:
+            print("\n  No games and no roster data -- skipping email.")
+        elif not roster:
+            # Auth failure -- send alert email
+            _send_alert_email(
+                team_name, target_date,
+                "FantasyBrief could not load your roster. "
+                "Your Fantrax session may have expired.\n\n"
+                "To fix: run 'python auth_login.py' in the FantasyBrief directory."
+            )
+        elif not games:
+            # No games -- skip email silently (off day)
+            print(f"\n  No MLB games on {target_date} -- skipping email.")
+        else:
+            # Normal brief -- build HTML and send
+            from lib.brief_builder import _is_recent_news, _is_injury_flag
+            fantrax_news_for_email = []
+            injury_flags_for_email = []
+            rss_covered = {item.get("matched_player", "") for item in relevant_news}
+            for p in roster:
+                pname = p.get("name", "?")
+                if pname in rss_covered:
+                    continue
+                for note in p.get("news", []):
+                    if _is_recent_news(note, target_date):
+                        fantrax_news_for_email.append((pname, note))
+            for p in roster:
+                for note in p.get("news", []):
+                    if _is_injury_flag(note):
+                        injury_flags_for_email.append((p.get("name", "?"), note))
 
-        html_text = brief_to_html(
-            team_name=team_name,
-            roster=roster,
-            box_scores=box_scores,
-            batter_statcast=batter_statcast,
-            pitcher_statcast=pitcher_statcast,
-            milb_stats=milb_stats,
-            news_items=relevant_news,
-            transactions=transactions,
-            probable_pitchers=probables,
-            target_date=target_date,
-            fantrax_news=fantrax_news_for_email,
-            injury_flags=injury_flags_for_email,
-        )
-        _send_email(brief_text, html_text, team_name, target_date)
+            html_text = brief_to_html(
+                team_name=team_name,
+                roster=roster,
+                box_scores=box_scores,
+                batter_statcast=batter_statcast,
+                pitcher_statcast=pitcher_statcast,
+                milb_stats=milb_stats,
+                news_items=relevant_news,
+                transactions=transactions,
+                probable_pitchers=probables,
+                target_date=target_date,
+                fantrax_news=fantrax_news_for_email,
+                injury_flags=injury_flags_for_email,
+            )
+            _send_email(brief_text, html_text, team_name, target_date)
 
     print()
     print(brief_text)
+
+
+def _send_alert_email(team_name: str, target_date: date, message: str):
+    """Send a short alert email (auth failure, etc.)."""
+    email_to = os.getenv("EMAIL_TO", "")
+    resend_key = os.getenv("RESEND_API_KEY", "")
+    if not (resend_key and email_to):
+        print(f"\n  Alert: {message}")
+        return
+
+    import resend
+    resend.api_key = resend_key
+    email_from = os.getenv("EMAIL_FROM", "FantasyBrief <onboarding@resend.dev>")
+    subject = f"FantasyBrief Alert: {team_name} -- {target_date.strftime('%b %d')}"
+    try:
+        print(f"\nSending alert to {email_to}...")
+        resend.Emails.send({
+            "from": email_from,
+            "to": [addr.strip() for addr in email_to.split(",")],
+            "subject": subject,
+            "text": message,
+        })
+        print("  Alert sent!")
+    except Exception as e:
+        print(f"  Alert failed: {e}")
 
 
 def _send_email(plain_text: str, html_text: str, team_name: str, target_date: date):
