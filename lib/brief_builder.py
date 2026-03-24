@@ -3,6 +3,11 @@ from datetime import date, datetime, timedelta, timezone
 
 _PITCHER_POSITIONS = {"SP", "RP", "P", "CL"}
 
+# News window: show news from this many hours before the brief's target date ends.
+# With a 10 AM ET run time, we want news from ~10 AM yesterday to ~10 AM today.
+# That's roughly: target_date 10:00 AM back 24 hours.
+NEWS_WINDOW_HOURS = 24
+
 
 def build_brief(
     team_name: str,
@@ -36,8 +41,9 @@ def build_brief(
     lines.append("")
 
     lines.extend(_build_scoring_summary(scoring_data))
-    lines.extend(_build_hitter_section(roster, box_scores, batter_statcast, milb_stats))
-    lines.extend(_build_pitcher_section(roster, box_scores, pitcher_statcast, milb_stats))
+    lines.extend(_build_hitter_section(roster, box_scores, batter_statcast))
+    lines.extend(_build_pitcher_section(roster, box_scores, pitcher_statcast))
+    lines.extend(_build_milb_section(roster, box_scores, milb_stats))
     lines.extend(_build_news_section(roster, news_items, target_date))
     lines.extend(_build_transactions_section(transactions, roster))
     lines.extend(_build_matchup_preview(probable_pitchers, roster))
@@ -76,7 +82,6 @@ def _build_hitter_section(
     roster: list[dict],
     box_scores: dict[str, dict],
     statcast: dict[str, dict],
-    milb_stats: dict[str, dict],
 ) -> list[str]:
     lines = []
     lines.append("-" * 70)
@@ -90,8 +95,7 @@ def _build_hitter_section(
         return lines
 
     played = [p for p in hitters if p.get("name") in box_scores]
-    milb = [p for p in hitters if p.get("name") not in box_scores and p.get("name") in milb_stats]
-    dnp = [p for p in hitters if p.get("name") not in box_scores and p.get("name") not in milb_stats]
+    dnp = [p for p in hitters if p.get("name") not in box_scores]
 
     for player in played:
         name = player.get("name", "Unknown")
@@ -132,21 +136,6 @@ def _build_hitter_section(
                 sc_parts2.append(f"Whiff%: {metrics['whiff_rate']}%")
             if sc_parts2:
                 lines.append("             " + " | ".join(sc_parts2))
-
-    if milb:
-        lines.append("\n  -- Minor League --")
-        for player in milb:
-            name = player.get("name", "Unknown")
-            team = player.get("team", "")
-            pos = player.get("position", "")
-            m = milb_stats.get(name, {})
-            level = m.get("level", "MiLB")
-            game = m.get("game", "")
-            stats = m.get("stats", {})
-            stat_line = stats.get("batting", stats.get("summary", ""))
-            lines.append(f"  {name} ({pos}, {team}) [{level}] -- {game}")
-            if stat_line:
-                lines.append(f"    {stat_line}")
 
     if dnp:
         dnp_names = [p.get("name", "?") for p in dnp]
@@ -205,7 +194,6 @@ def _build_pitcher_section(
     roster: list[dict],
     box_scores: dict[str, dict],
     statcast: dict[str, dict],
-    milb_stats: dict[str, dict],
 ) -> list[str]:
     lines = []
     lines.append("-" * 70)
@@ -219,8 +207,7 @@ def _build_pitcher_section(
         return lines
 
     played = [p for p in pitchers if p.get("name") in box_scores]
-    milb = [p for p in pitchers if p.get("name") not in box_scores and p.get("name") in milb_stats]
-    dnp = [p for p in pitchers if p.get("name") not in box_scores and p.get("name") not in milb_stats]
+    dnp = [p for p in pitchers if p.get("name") not in box_scores]
 
     for player in played:
         name = player.get("name", "Unknown")
@@ -263,21 +250,6 @@ def _build_pitcher_section(
                 mix_str = ", ".join(f"{pt}: {pct}%" for pt, pct in sorted(pitch_mix.items(), key=lambda x: -x[1]))
                 lines.append(f"    Mix: {mix_str}")
 
-    if milb:
-        lines.append("\n  -- Minor League --")
-        for player in milb:
-            name = player.get("name", "Unknown")
-            team = player.get("team", "")
-            pos = player.get("position", "")
-            m = milb_stats.get(name, {})
-            level = m.get("level", "MiLB")
-            game = m.get("game", "")
-            stats = m.get("stats", {})
-            stat_line = stats.get("pitching", stats.get("summary", ""))
-            lines.append(f"  {name} ({pos}, {team}) [{level}] -- {game}")
-            if stat_line:
-                lines.append(f"    {stat_line}")
-
     if dnp:
         dnp_names = [p.get("name", "?") for p in dnp]
         lines.append(f"\n  DNP: {', '.join(dnp_names)}")
@@ -299,6 +271,47 @@ def _format_pitcher_line(stats: dict) -> str:
     pitch_info = f"({pitches} pitches, {strikes} strikes)" if int(pitches) > 0 else ""
     hr_part = f", {hr} HR" if hr > 0 else ""
     return f"{ip} IP, {h} H, {er} ER, {bb} BB, {k} K{hr_part} {pitch_info}".strip()
+
+
+# ---------------------------------------------------------------------------
+# MINOR LEAGUE SECTION
+# ---------------------------------------------------------------------------
+
+def _build_milb_section(
+    roster: list[dict],
+    box_scores: dict[str, dict],
+    milb_stats: dict[str, dict],
+) -> list[str]:
+    """Separate section for minor league performances."""
+    # Players in MiLB: not in MLB box scores but found in MiLB data
+    milb_players = [
+        p for p in roster
+        if p.get("name") not in box_scores and p.get("name") in milb_stats
+    ]
+    if not milb_players:
+        return []
+
+    lines = []
+    lines.append("-" * 70)
+    lines.append("  MINOR LEAGUE REPORT")
+    lines.append("-" * 70)
+
+    for player in milb_players:
+        name = player.get("name", "Unknown")
+        team = player.get("team", "")
+        pos = player.get("position", "")
+        m = milb_stats.get(name, {})
+        level = m.get("level", "MiLB")
+        game = m.get("game", "")
+        stats = m.get("stats", {})
+        player_type = m.get("type", "")
+        stat_line = stats.get("batting", stats.get("pitching", stats.get("summary", "")))
+        lines.append(f"\n  {name} ({pos}, {team}) [{level}] -- {game}")
+        if stat_line:
+            lines.append(f"    {stat_line}")
+
+    lines.append("")
+    return lines
 
 
 # ---------------------------------------------------------------------------
@@ -380,31 +393,56 @@ def _parse_news_time(note: str) -> str | None:
 
 
 def _is_recent_news(note: str, target_date: date) -> bool:
-    """Check if a Fantrax news note is from the target date or the day before.
+    """Check if a Fantrax news note falls within the brief's news window.
 
-    For a brief covering games on target_date, we want news from:
-    - target_date itself (game recaps, post-game news)
-    - target_date - 1 (overnight/morning news before games)
-    But NOT target_date + 1 (that's tomorrow's news).
+    For a 10 AM ET run covering yesterday's games, we want news from
+    ~10 AM the day before target_date through ~10 AM the day after target_date.
+    This captures: pre-game news, game recaps, and overnight/morning updates.
     """
     import re
-    match = re.match(r"^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),", note)
+    _MONTHS = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
+               "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12}
+    match = re.match(
+        r"^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),\s+(\d{1,2}):(\d{2})\s+(AM|PM):",
+        note,
+    )
     if not match:
-        return False
-    month_str = match.group(1)
+        # No timestamp — check just date
+        date_match = re.match(r"^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2}),", note)
+        if not date_match:
+            return False
+        month = _MONTHS.get(date_match.group(1), 0)
+        day = int(date_match.group(2))
+        if not month:
+            return False
+        try:
+            note_date = date(target_date.year, month, day)
+        except ValueError:
+            return False
+        diff = (target_date - note_date).days
+        return 0 <= diff <= 1
+
+    month = _MONTHS.get(match.group(1), 0)
     day = int(match.group(2))
-    months = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
-              "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12}
-    month = months.get(month_str, 0)
+    hour = int(match.group(3))
+    minute = int(match.group(4))
+    ampm = match.group(5)
+    if ampm == "PM" and hour != 12:
+        hour += 12
+    elif ampm == "AM" and hour == 12:
+        hour = 0
     if not month:
         return False
     try:
-        note_date = date(target_date.year, month, day)
+        note_dt = datetime(target_date.year, month, day, hour, minute)
     except ValueError:
         return False
-    # Include news from target_date and the day before only
-    diff = (target_date - note_date).days
-    return 0 <= diff <= 1
+
+    # Window: from 10 AM on (target_date - 1) to 10 AM on (target_date + 1)
+    # This gives a full 24h centered on the game day
+    window_start = datetime(target_date.year, target_date.month, target_date.day, 10, 0) - timedelta(days=1)
+    window_end = datetime(target_date.year, target_date.month, target_date.day, 10, 0) + timedelta(days=1)
+    return window_start <= note_dt <= window_end
 
 
 def _is_injury_flag(note: str) -> bool:
