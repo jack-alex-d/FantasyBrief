@@ -181,6 +181,17 @@ def _build_hitter_section(
         game = box.get("game", "")
         pts = batter_sort_score(box)
         metrics = statcast.get(name, {})
+        # Compute non-contact fantasy points for xPts calculation
+        if "xwoba_fantasy_pts" in metrics:
+            nc = (
+                int(stats.get("r", 0)) * 1.0
+                + int(stats.get("rbi", 0)) * 1.0
+                + int(stats.get("bb", 0)) * 1.0
+                + int(stats.get("hbp", 0)) * 1.0
+                + int(stats.get("sb", 0)) * 2.0
+                - int(stats.get("k", 0)) * 0.5
+            )
+            metrics["non_contact_pts"] = nc
         xpts = batter_expected_pts(pts, metrics)
 
         stat_line = format_batter_line(stats)

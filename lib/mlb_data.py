@@ -224,12 +224,23 @@ def compute_batter_metrics(statcast_df: pd.DataFrame) -> dict:
                 expected_hits = float(xba_values.sum())
                 actual_hits = len(bbe[bbe["events"].isin([
                     "single", "double", "triple", "home_run",
-                ]) if "events" in bbe.columns else []])
+                ])] if "events" in bbe.columns else [])
                 metrics["expected_hits"] = round(expected_hits, 1)
                 metrics["actual_hits"] = actual_hits
                 metrics["hit_luck"] = round(actual_hits - expected_hits, 1)
+        # xwOBA -> expected fantasy points per BBE
+        # xwOBA scale: ~0 = out, ~0.69 = BB/HBP value, ~0.88 = 1B, ~1.24 = 2B, ~1.56 = 3B, ~2.07 = HR
+        # Fantasy pts: out=0, 1B=1, 2B=2, 3B=3, HR=4
+        # Linear mapping: fantasy_pts_per_bbe ≈ xwOBA * 2.0 (calibrated: 0.88 wOBA * 2.0 ≈ 1.76 ~= 1B+RBI avg)
+        # More precise: use ratio of fantasy scale to wOBA scale
+        # wOBA 1B=0.88 -> FP 1, wOBA HR=2.07 -> FP 4. Ratio: FP = xwOBA * (4/2.07) ≈ xwOBA * 1.93
+        XWOBA_TO_FP_SCALE = 1.93
         if "estimated_woba_using_speedangle" in bbe.columns:
-            metrics["xwOBA"] = _safe_round(bbe["estimated_woba_using_speedangle"].mean(), 3)
+            xwoba_values = bbe["estimated_woba_using_speedangle"].dropna()
+            metrics["xwOBA"] = _safe_round(xwoba_values.mean(), 3)
+            if len(xwoba_values) > 0:
+                xwoba_fp_sum = float((xwoba_values * XWOBA_TO_FP_SCALE).sum())
+                metrics["xwoba_fantasy_pts"] = round(xwoba_fp_sum, 1)
     # Plate discipline
     total_pitches = len(statcast_df)
     swings = statcast_df[statcast_df["description"].str.contains("swing|foul|hit_into_play", case=False, na=False)]

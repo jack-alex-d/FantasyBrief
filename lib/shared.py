@@ -72,22 +72,30 @@ def pitcher_sort_score(box: dict) -> float:
 
 
 def batter_expected_pts(actual_pts: float, statcast_metrics: dict) -> float | None:
-    """Compute expected fantasy points using xBA-based hit expectation.
+    """Compute expected fantasy points using xwOBA (or xBA fallback).
 
-    Adjusts actual points by the hit luck delta:
-    - If xBA says you should have had 2.5 hits but got 2, you were 0.5 unlucky
-    - Each "lost" hit is worth ~1.0 pts (single value) on average
-    - xPts = actual_pts + (expected_hits - actual_hits) * avg_hit_value
+    Uses per-BBE expected weighted on-base average to estimate what the
+    batted ball outcomes "should have" been worth in fantasy points.
+    xwOBA captures both hit probability AND extra-base hit quality
+    (exit velo + launch angle -> expected total bases).
+
+    Conversion: xwOBA -> expected fantasy points per BBE using a linear
+    mapping calibrated to our scoring (1B=1, 2B=2, 3B=3, HR=4).
 
     Returns None if Statcast data is insufficient.
     """
+    xwoba_pts = statcast_metrics.get("xwoba_fantasy_pts")
+    if xwoba_pts is not None:
+        # xwoba_fantasy_pts is the sum of per-BBE expected fantasy point values
+        # Add back non-contact points (BB, K, HBP, SB etc) from actual
+        non_contact_pts = statcast_metrics.get("non_contact_pts", 0)
+        return round(xwoba_pts + non_contact_pts, 1)
+
+    # Fallback to xBA-only if xwOBA wasn't available
     hit_luck = statcast_metrics.get("hit_luck")
     if hit_luck is None:
         return None
-    # Average single is worth 1.0 pts in this scoring system
-    # (actual XBH distribution is already captured in actual_pts)
-    avg_hit_value = 1.0
-    return round(actual_pts - hit_luck * avg_hit_value, 1)
+    return round(actual_pts - hit_luck * 1.0, 1)
 
 
 def format_batter_line(stats: dict) -> str:
