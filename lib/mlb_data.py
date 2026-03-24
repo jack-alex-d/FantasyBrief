@@ -216,47 +216,19 @@ def compute_batter_metrics(statcast_df: pd.DataFrame) -> dict:
         if "launch_speed" in bbe.columns:
             hard_hit = bbe[bbe["launch_speed"] >= 95]
             metrics["hard_hit_pct"] = _safe_round(len(hard_hit) / len(bbe) * 100)
-        # xBA and expected hits
+        # Expected stats
         if "estimated_ba_using_speedangle" in bbe.columns:
-            xba_values = bbe["estimated_ba_using_speedangle"].dropna()
-            metrics["xBA"] = _safe_round(xba_values.mean(), 3)
-            if len(xba_values) > 0:
-                expected_hits = float(xba_values.sum())
-                actual_hits = len(bbe[bbe["events"].isin([
-                    "single", "double", "triple", "home_run",
-                ])] if "events" in bbe.columns else [])
-                metrics["expected_hits"] = round(expected_hits, 1)
-                metrics["actual_hits"] = actual_hits
-                metrics["hit_luck"] = round(actual_hits - expected_hits, 1)
-        # xwOBA -> expected fantasy points per BBE
-        # Uses both xBA and xwOBA: xwOBA/xBA gives average hit quality on wOBA scale,
-        # then we map wOBA scale to fantasy scale using a linear fit through:
-        #   1B: wOBA=0.883 -> FP=1, 2B: wOBA=1.244 -> FP=2,
-        #   3B: wOBA=1.569 -> FP=3, HR: wOBA=2.065 -> FP=4
-        # Fit: FP_per_hit = 2.560 * avg_wOBA_per_hit - 1.188
-        # Then: xFP_per_BBE = xBA * FP_per_hit (expected hits * expected value per hit)
-        WOBA_TO_FP_SLOPE = 2.560
-        WOBA_TO_FP_INTERCEPT = -1.188
+            metrics["xBA"] = _safe_round(bbe["estimated_ba_using_speedangle"].dropna().mean(), 3)
         if "estimated_woba_using_speedangle" in bbe.columns:
-            # Need per-BBE pairs of xBA and xwOBA
-            bbe_with_both = bbe[["estimated_ba_using_speedangle", "estimated_woba_using_speedangle"]].dropna()
-            if len(bbe_with_both) > 0:
-                xwoba_all = bbe["estimated_woba_using_speedangle"].dropna()
-                metrics["xwOBA"] = _safe_round(xwoba_all.mean(), 3)
-                xfp_total = 0.0
-                for _, pair in bbe_with_both.iterrows():
-                    per_xba = pair["estimated_ba_using_speedangle"]
-                    per_xwoba = pair["estimated_woba_using_speedangle"]
-                    if per_xba > 0.001:
-                        avg_woba_per_hit = per_xwoba / per_xba
-                        fp_per_hit = max(0, WOBA_TO_FP_SLOPE * avg_woba_per_hit + WOBA_TO_FP_INTERCEPT)
-                        xfp_total += per_xba * fp_per_hit
-                    # else: near-zero xBA means almost certain out, contributes ~0 xFP
-                metrics["xwoba_fantasy_pts"] = round(xfp_total, 1)
-            elif "estimated_woba_using_speedangle" in bbe.columns:
-                xwoba_all = bbe["estimated_woba_using_speedangle"].dropna()
-                if len(xwoba_all) > 0:
-                    metrics["xwOBA"] = _safe_round(xwoba_all.mean(), 3)
+            metrics["xwOBA"] = _safe_round(bbe["estimated_woba_using_speedangle"].dropna().mean(), 3)
+        # xSLG per BBE = expected total bases for that batted ball.
+        # In our scoring, hits ARE total bases (1B=1, 2B=2, 3B=3, HR=4).
+        # So sum of per-BBE xSLG = expected fantasy points from contact.
+        if "estimated_slg_using_speedangle" in bbe.columns:
+            xslg_values = bbe["estimated_slg_using_speedangle"].dropna()
+            if len(xslg_values) > 0:
+                metrics["xSLG"] = _safe_round(xslg_values.mean(), 3)
+                metrics["expected_contact_pts"] = round(float(xslg_values.sum()), 1)
     # Plate discipline
     total_pitches = len(statcast_df)
     swings = statcast_df[statcast_df["description"].str.contains("swing|foul|hit_into_play", case=False, na=False)]

@@ -72,30 +72,20 @@ def pitcher_sort_score(box: dict) -> float:
 
 
 def batter_expected_pts(actual_pts: float, statcast_metrics: dict) -> float | None:
-    """Compute expected fantasy points using xwOBA (or xBA fallback).
+    """Compute expected fantasy points using xSLG (expected total bases).
 
-    Uses per-BBE expected weighted on-base average to estimate what the
-    batted ball outcomes "should have" been worth in fantasy points.
-    xwOBA captures both hit probability AND extra-base hit quality
-    (exit velo + launch angle -> expected total bases).
-
-    Conversion: xwOBA -> expected fantasy points per BBE using a linear
-    mapping calibrated to our scoring (1B=1, 2B=2, 3B=3, HR=4).
+    In our scoring, hits = total bases (1B=1, 2B=2, 3B=3, HR=4).
+    Per-BBE xSLG IS the expected total bases for that batted ball.
+    Sum of per-BBE xSLG = expected fantasy points from contact.
+    Add non-contact events (BB, K, HBP, SB, R, RBI) at actual value.
 
     Returns None if Statcast data is insufficient.
     """
-    xwoba_pts = statcast_metrics.get("xwoba_fantasy_pts")
-    if xwoba_pts is not None:
-        # xwoba_fantasy_pts is the sum of per-BBE expected fantasy point values
-        # Add back non-contact points (BB, K, HBP, SB etc) from actual
-        non_contact_pts = statcast_metrics.get("non_contact_pts", 0)
-        return round(xwoba_pts + non_contact_pts, 1)
-
-    # Fallback to xBA-only if xwOBA wasn't available
-    hit_luck = statcast_metrics.get("hit_luck")
-    if hit_luck is None:
+    expected_contact = statcast_metrics.get("expected_contact_pts")
+    if expected_contact is None:
         return None
-    return round(actual_pts - hit_luck * 1.0, 1)
+    non_contact_pts = statcast_metrics.get("non_contact_pts", 0)
+    return round(expected_contact + non_contact_pts, 1)
 
 
 def format_batter_line(stats: dict) -> str:

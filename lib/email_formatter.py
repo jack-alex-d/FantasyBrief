@@ -189,7 +189,7 @@ def _html_hitters(roster: list[dict], box_scores: dict, statcast: dict) -> str:
 
         stat_line = format_batter_line(stats)
         pts = batter_sort_score(box)
-        if "xwoba_fantasy_pts" in metrics:
+        if "expected_contact_pts" in metrics:
             nc = (
                 int(stats.get("r", 0)) * 1.0 + int(stats.get("rbi", 0)) * 1.0
                 + int(stats.get("bb", 0)) * 1.0 + int(stats.get("hbp", 0)) * 1.0
