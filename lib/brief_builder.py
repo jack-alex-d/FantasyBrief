@@ -202,10 +202,12 @@ def _build_hitter_section(
                 sc_parts.append(f"Avg EV: {metrics['avg_exit_velo']} mph")
             if metrics.get("max_exit_velo"):
                 sc_parts.append(f"Max EV: {metrics['max_exit_velo']}")
-            if metrics.get("xBA") is not None:
-                sc_parts.append(f"xBA: {metrics['xBA']}")
-            if metrics.get("xSLG") is not None:
-                sc_parts.append(f"xSLG: {metrics['xSLG']}")
+            # xBA and xSLG normalized by ABs (Ks count as 0), matching Savant convention
+            ab = int(stats.get("ab", 0))
+            if ab > 0 and metrics.get("xBA_sum") is not None:
+                sc_parts.append(f"xBA: {metrics['xBA_sum'] / ab:.3f}")
+            if ab > 0 and metrics.get("xSLG_sum") is not None:
+                sc_parts.append(f"xSLG: {metrics['xSLG_sum'] / ab:.3f}")
             if sc_parts:
                 lines.append("    Statcast: " + " | ".join(sc_parts))
             sc_parts2 = []

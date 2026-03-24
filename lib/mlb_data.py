@@ -257,19 +257,21 @@ def compute_batter_metrics(statcast_df: pd.DataFrame) -> dict:
         if "launch_speed" in bbe.columns:
             hard_hit = bbe[bbe["launch_speed"] >= 95]
             metrics["hard_hit_pct"] = _safe_round(len(hard_hit) / len(bbe) * 100)
-        # Expected stats
+        # Expected stats — sums across BBE (divided by ABs for display rates)
+        # Strikeouts/non-contact ABs count as 0 xBA/xSLG, matching Savant convention.
         if "estimated_ba_using_speedangle" in bbe.columns:
-            metrics["xBA"] = _safe_round(bbe["estimated_ba_using_speedangle"].dropna().mean(), 3)
+            xba_sum = float(bbe["estimated_ba_using_speedangle"].dropna().sum())
+            metrics["xBA_sum"] = round(xba_sum, 3)
         if "estimated_woba_using_speedangle" in bbe.columns:
-            metrics["xwOBA"] = _safe_round(bbe["estimated_woba_using_speedangle"].dropna().mean(), 3)
-        # xSLG per BBE = expected total bases for that batted ball.
-        # In our scoring, hits ARE total bases (1B=1, 2B=2, 3B=3, HR=4).
-        # So sum of per-BBE xSLG = expected fantasy points from contact.
+            xwoba_sum = float(bbe["estimated_woba_using_speedangle"].dropna().sum())
+            metrics["xwOBA_sum"] = round(xwoba_sum, 3)
         if "estimated_slg_using_speedangle" in bbe.columns:
             xslg_values = bbe["estimated_slg_using_speedangle"].dropna()
             if len(xslg_values) > 0:
-                metrics["xSLG"] = _safe_round(xslg_values.mean(), 3)
-                metrics["expected_contact_pts"] = round(float(xslg_values.sum()), 1)
+                xslg_sum = float(xslg_values.sum())
+                metrics["xSLG_sum"] = round(xslg_sum, 3)
+                # Sum of per-BBE xSLG = expected total bases from contact
+                metrics["expected_contact_pts"] = round(xslg_sum, 1)
     # Plate discipline
     total_pitches = len(statcast_df)
     swings = statcast_df[statcast_df["description"].str.contains("swing|foul|hit_into_play", case=False, na=False)]

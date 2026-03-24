@@ -193,6 +193,13 @@ def _html_hitters(roster: list[dict], box_scores: dict, statcast: dict) -> str:
         if "expected_contact_pts" in metrics:
             metrics["non_contact_pts"] = non_contact_pts(stats)
         xpts = batter_expected_pts(pts, metrics)
+        # Compute xBA/xSLG rates normalized by ABs for display
+        ab = int(stats.get("ab", 0))
+        if ab > 0:
+            if metrics.get("xBA_sum") is not None:
+                metrics["xBA"] = round(metrics["xBA_sum"] / ab, 3)
+            if metrics.get("xSLG_sum") is not None:
+                metrics["xSLG"] = round(metrics["xSLG_sum"] / ab, 3)
         pts_class = "pts-pos" if pts > 0 else ("pts-neg" if pts < 0 else "pts-zero")
         xpts_html = ""
         if xpts is not None:
