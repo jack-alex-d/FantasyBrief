@@ -53,6 +53,7 @@ def brief_to_html(
     sections = []
     sections.append(_html_header(team_name, target_date))
     sections.append(_html_roster_alerts(roster))
+    sections.append(_html_tldr(roster, box_scores))
     sections.append(_html_hitters(roster, box_scores, batter_statcast))
     sections.append(_html_pitchers(roster, box_scores, pitcher_statcast))
     sections.append(_html_milb(roster, box_scores, milb_stats))
@@ -99,6 +100,13 @@ def brief_to_html(
   .matchup-teams {{ font-weight: 600; }}
   .matchup-pitchers {{ color: #666; font-size: 13px; }}
   .pitch-mix {{ font-size: 12px; color: #666; margin-top: 2px; }}
+  .tldr {{ background: #1a3a5c; color: white; padding: 14px 20px; font-size: 15px; }}
+  .tldr-pts {{ font-size: 22px; font-weight: 700; }}
+  .tldr-detail {{ font-size: 13px; color: #a0c4e8; margin-top: 4px; }}
+  .pts {{ font-weight: 600; font-size: 12px; padding: 2px 6px; border-radius: 3px; margin-left: 6px; }}
+  .pts-pos {{ background: #dcfce7; color: #16a34a; }}
+  .pts-neg {{ background: #fde8e8; color: #cf222e; }}
+  .pts-zero {{ background: #f3f4f6; color: #666; }}
   .footer {{ background: #f8f9fa; padding: 16px; text-align: center; font-size: 12px; color: #999; }}
   .divider {{ border: 0; border-top: 1px solid #eee; margin: 0; }}
 </style>
@@ -115,6 +123,26 @@ def _html_header(team_name: str, target_date: date) -> str:
     return f"""<div class="header">
   <h1>{_esc(team_name)} -- Daily Brief</h1>
   <div class="date">{target_date.strftime('%A, %B %d, %Y')}</div>
+</div>"""
+
+
+def _html_tldr(roster: list[dict], box_scores: dict) -> str:
+    player_scores = []
+    for p in roster:
+        name = p.get("name", "")
+        if name in box_scores:
+            box = box_scores[name]
+            pts = batter_sort_score(box) if box.get("type") == "batter" else pitcher_sort_score(box)
+            player_scores.append((name, pts))
+    if not player_scores:
+        return ""
+    total = sum(pts for _, pts in player_scores)
+    player_scores.sort(key=lambda x: x[1], reverse=True)
+    best_name, best_pts = player_scores[0]
+    worst_name, worst_pts = player_scores[-1]
+    return f"""<div class="tldr">
+  <div class="tldr-pts">Est. {total:+.1f} pts from {len(player_scores)} players</div>
+  <div class="tldr-detail">Best: {_esc(best_name)} ({best_pts:+.1f}) | Worst: {_esc(worst_name)} ({worst_pts:+.1f})</div>
 </div>"""
 
 
@@ -159,8 +187,10 @@ def _html_hitters(roster: list[dict], box_scores: dict, statcast: dict) -> str:
         metrics = statcast.get(name, {})
 
         stat_line = format_batter_line(stats)
+        pts = batter_sort_score(box)
+        pts_class = "pts-pos" if pts > 0 else ("pts-neg" if pts < 0 else "pts-zero")
         items.append(f"""<div class="player">
-  <span class="player-name">{_esc(name)}</span>
+  <span class="player-name">{_esc(name)}</span><span class="pts {pts_class}">{pts:+.1f}</span>
   <span class="player-meta">({_esc(p.get('position',''))}, {_esc(p.get('team',''))}) -- {_esc(game)}</span>
   <div class="stat-line">{_esc(stat_line)}</div>
   {_html_batter_statcast(metrics)}
@@ -227,9 +257,11 @@ def _html_pitchers(roster: list[dict], box_scores: dict, statcast: dict) -> str:
         metrics = statcast.get(name, {})
 
         pitch_line = format_pitcher_line(stats)
+        pts = pitcher_sort_score(box)
+        pts_class = "pts-pos" if pts > 0 else ("pts-neg" if pts < 0 else "pts-zero")
         decision = f" {_esc(note)}" if note else ""
         items.append(f"""<div class="player">
-  <span class="player-name">{_esc(name)}</span>{decision}
+  <span class="player-name">{_esc(name)}</span>{decision}<span class="pts {pts_class}">{pts:+.1f}</span>
   <span class="player-meta">({_esc(p.get('position',''))}, {_esc(p.get('team',''))}) -- {_esc(game)}</span>
   <div class="stat-line">{_esc(pitch_line)}</div>
   {_html_pitcher_statcast(metrics)}

@@ -42,6 +42,7 @@ def build_brief(
     lines.append("=" * 70)
     lines.append("")
 
+    lines.extend(_build_tldr(roster, box_scores, milb_stats))
     lines.extend(_build_roster_alerts(roster))
     lines.extend(_build_scoring_summary(scoring_data))
     lines.extend(_build_hitter_section(roster, box_scores, batter_statcast))
@@ -57,6 +58,38 @@ def build_brief(
     lines.append("=" * 70)
 
     return "\n".join(lines)
+
+
+def _build_tldr(roster: list[dict], box_scores: dict[str, dict], milb_stats: dict[str, dict]) -> list[str]:
+    """Build a TL;DR summary block at the very top."""
+    lines = []
+
+    # Compute fantasy points for everyone who played
+    player_scores = []
+    for p in roster:
+        name = p.get("name", "")
+        if name in box_scores:
+            box = box_scores[name]
+            if box.get("type") == "batter":
+                pts = batter_sort_score(box)
+            else:
+                pts = pitcher_sort_score(box)
+            player_scores.append((name, pts))
+
+    if not player_scores:
+        return []
+
+    total_pts = sum(pts for _, pts in player_scores)
+    player_scores.sort(key=lambda x: x[1], reverse=True)
+    best_name, best_pts = player_scores[0]
+    worst_name, worst_pts = player_scores[-1]
+    players_active = len(player_scores)
+
+    lines.append(f"  TL;DR: {players_active} players active | Est. {total_pts:+.1f} pts")
+    lines.append(f"  Best: {best_name} ({best_pts:+.1f}) | Worst: {worst_name} ({worst_pts:+.1f})")
+    lines.append("")
+
+    return lines
 
 
 def _build_scoring_summary(scoring_data: dict) -> list[str]:
@@ -145,10 +178,10 @@ def _build_hitter_section(
         box = box_scores.get(name, {})
         stats = box.get("stats", {})
         game = box.get("game", "")
+        pts = batter_sort_score(box)
 
-        # Traditional stat line: 2-for-4, HR, 2 RBI, R, BB, K
         stat_line = format_batter_line(stats)
-        lines.append(f"\n  {name} ({pos}, {team}) -- {game}")
+        lines.append(f"\n  {name} ({pos}, {team}) [{pts:+.1f} pts] -- {game}")
         lines.append(f"    {stat_line}")
 
         # Statcast underneath
@@ -184,41 +217,6 @@ def _build_hitter_section(
 
     lines.append("")
     return lines
-
-
-def format_batter_line(stats: dict) -> str:
-    """Format traditional batter stat line: 2-for-4, HR, 2 RBI, R, BB, K"""
-    h = int(stats.get("h", 0))
-    ab = int(stats.get("ab", 0))
-    parts = [f"{h}-for-{ab}"]
-    doubles = int(stats.get("doubles", 0))
-    triples = int(stats.get("triples", 0))
-    hr = int(stats.get("hr", 0))
-    rbi = int(stats.get("rbi", 0))
-    r = int(stats.get("r", 0))
-    bb = int(stats.get("bb", 0))
-    hbp = int(stats.get("hbp", 0))
-    k = int(stats.get("k", 0))
-    sb = int(stats.get("sb", 0))
-    if doubles:
-        parts.append(f"{'2B' if doubles == 1 else f'{doubles} 2B'}")
-    if triples:
-        parts.append(f"{'3B' if triples == 1 else f'{triples} 3B'}")
-    if hr:
-        parts.append(f"{'HR' if hr == 1 else f'{hr} HR'}")
-    if rbi:
-        parts.append(f"{'RBI' if rbi == 1 else f'{rbi} RBI'}")
-    if r:
-        parts.append(f"{'R' if r == 1 else f'{r} R'}")
-    if bb:
-        parts.append(f"{'BB' if bb == 1 else f'{bb} BB'}")
-    if hbp:
-        parts.append("HBP")
-    if k:
-        parts.append(f"{'K' if k == 1 else f'{k} K'}")
-    if sb:
-        parts.append(f"{'SB' if sb == 1 else f'{sb} SB'}")
-    return ", ".join(parts)
 
 
 def _count_bbe(metrics: dict) -> int | None:
@@ -259,11 +257,11 @@ def _build_pitcher_section(
         stats = box.get("stats", {})
         game = box.get("game", "")
         note = stats.get("note", "")
+        pts = pitcher_sort_score(box)
 
-        # Traditional line: 6.0 IP, 4 H, 2 ER, 1 BB, 9 K (92 pitches)
         pitch_line = format_pitcher_line(stats)
         decision = f" {note}" if note else ""
-        lines.append(f"\n  {name} ({pos}, {team}){decision} -- {game}")
+        lines.append(f"\n  {name} ({pos}, {team}){decision} [{pts:+.1f} pts] -- {game}")
         lines.append(f"    {pitch_line}")
 
         # Statcast underneath
@@ -298,21 +296,6 @@ def _build_pitcher_section(
 
     lines.append("")
     return lines
-
-
-def format_pitcher_line(stats: dict) -> str:
-    """Format traditional pitcher line: 6.0 IP, 4 H, 2 ER, 1 BB, 9 K (92 pitches)"""
-    ip = stats.get("ip", "0")
-    h = stats.get("h", "0")
-    er = stats.get("er", "0")
-    bb = stats.get("bb", "0")
-    k = stats.get("k", "0")
-    pitches = stats.get("pitches", "0")
-    strikes = stats.get("strikes", "0")
-    hr = int(stats.get("hr", "0"))
-    pitch_info = f"({pitches} pitches, {strikes} strikes)" if int(pitches) > 0 else ""
-    hr_part = f", {hr} HR" if hr > 0 else ""
-    return f"{ip} IP, {h} H, {er} ER, {bb} BB, {k} K{hr_part} {pitch_info}".strip()
 
 
 # ---------------------------------------------------------------------------
