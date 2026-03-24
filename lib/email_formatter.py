@@ -229,7 +229,7 @@ def _html_batter_statcast(metrics: dict) -> str:
     bbe = metrics.get("bbe_count", 0)
     if bbe:
         parts.append(f'<span class="metric neutral">{bbe} BBE</span>')
-    for key, label in [("avg_exit_velo", "EV"), ("max_exit_velo", "Max EV"), ("xBA", "xBA")]:
+    for key, label in [("avg_exit_velo", "EV"), ("max_exit_velo", "Max EV"), ("xBA", "xBA"), ("xSLG", "xSLG")]:
         val = metrics.get(key)
         if val is not None:
             unit = " mph" if "velo" in key else ""

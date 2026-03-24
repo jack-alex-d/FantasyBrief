@@ -181,8 +181,10 @@ def _build_hitter_section(
         game = box.get("game", "")
         pts = batter_sort_score(box)
         metrics = statcast.get(name, {})
-        # Compute non-contact fantasy points for xPts calculation
+        # xPts: replace only total bases with expected (xSLG sum), keep all else actual
+        xpts = None
         if "expected_contact_pts" in metrics:
+            # Non-contact pts = everything except total bases
             nc = (
                 int(stats.get("r", 0)) * 1.0
                 + int(stats.get("rbi", 0)) * 1.0
@@ -192,15 +194,13 @@ def _build_hitter_section(
                 - int(stats.get("k", 0)) * 0.5
             )
             metrics["non_contact_pts"] = nc
-        xpts = batter_expected_pts(pts, metrics)
+            xpts = batter_expected_pts(pts, metrics)
 
         stat_line = format_batter_line(stats)
         xpts_str = f", xPts: {xpts:+.1f}" if xpts is not None and abs(xpts - pts) >= 0.5 else ""
         lines.append(f"\n  {name} ({pos}, {team}) [{pts:+.1f} pts{xpts_str}] -- {game}")
         lines.append(f"    {stat_line}")
 
-        # Statcast underneath
-        metrics = statcast.get(name, {})
         if metrics:
             bbe_count = _count_bbe(metrics)
             sc_parts = []
@@ -212,6 +212,8 @@ def _build_hitter_section(
                 sc_parts.append(f"Max EV: {metrics['max_exit_velo']}")
             if metrics.get("xBA") is not None:
                 sc_parts.append(f"xBA: {metrics['xBA']}")
+            if metrics.get("xSLG") is not None:
+                sc_parts.append(f"xSLG: {metrics['xSLG']}")
             if sc_parts:
                 lines.append("    Statcast: " + " | ".join(sc_parts))
             sc_parts2 = []
