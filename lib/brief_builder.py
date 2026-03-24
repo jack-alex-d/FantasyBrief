@@ -5,6 +5,7 @@ from lib.shared import (
     is_hitter,
     is_pitcher,
     batter_sort_score,
+    batter_expected_pts,
     pitcher_sort_score,
     format_batter_line,
     format_pitcher_line,
@@ -179,9 +180,12 @@ def _build_hitter_section(
         stats = box.get("stats", {})
         game = box.get("game", "")
         pts = batter_sort_score(box)
+        metrics = statcast.get(name, {})
+        xpts = batter_expected_pts(pts, metrics)
 
         stat_line = format_batter_line(stats)
-        lines.append(f"\n  {name} ({pos}, {team}) [{pts:+.1f} pts] -- {game}")
+        xpts_str = f", xPts: {xpts:+.1f}" if xpts is not None and abs(xpts - pts) >= 0.5 else ""
+        lines.append(f"\n  {name} ({pos}, {team}) [{pts:+.1f} pts{xpts_str}] -- {game}")
         lines.append(f"    {stat_line}")
 
         # Statcast underneath

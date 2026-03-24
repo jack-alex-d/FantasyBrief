@@ -5,6 +5,7 @@ from lib.shared import (
     is_hitter,
     is_pitcher,
     batter_sort_score,
+    batter_expected_pts,
     pitcher_sort_score,
     format_batter_line,
     format_pitcher_line,
@@ -188,9 +189,14 @@ def _html_hitters(roster: list[dict], box_scores: dict, statcast: dict) -> str:
 
         stat_line = format_batter_line(stats)
         pts = batter_sort_score(box)
+        xpts = batter_expected_pts(pts, metrics)
         pts_class = "pts-pos" if pts > 0 else ("pts-neg" if pts < 0 else "pts-zero")
+        xpts_html = ""
+        if xpts is not None and abs(xpts - pts) >= 0.5:
+            xpts_class = "pts-pos" if xpts > pts else "pts-neg"
+            xpts_html = f' <span class="pts {xpts_class}" style="opacity:0.7">xPts: {xpts:+.1f}</span>'
         items.append(f"""<div class="player">
-  <span class="player-name">{_esc(name)}</span><span class="pts {pts_class}">{pts:+.1f}</span>
+  <span class="player-name">{_esc(name)}</span><span class="pts {pts_class}">{pts:+.1f}</span>{xpts_html}
   <span class="player-meta">({_esc(p.get('position',''))}, {_esc(p.get('team',''))}) -- {_esc(game)}</span>
   <div class="stat-line">{_esc(stat_line)}</div>
   {_html_batter_statcast(metrics)}

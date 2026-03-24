@@ -71,6 +71,25 @@ def pitcher_sort_score(box: dict) -> float:
         return 0
 
 
+def batter_expected_pts(actual_pts: float, statcast_metrics: dict) -> float | None:
+    """Compute expected fantasy points using xBA-based hit expectation.
+
+    Adjusts actual points by the hit luck delta:
+    - If xBA says you should have had 2.5 hits but got 2, you were 0.5 unlucky
+    - Each "lost" hit is worth ~1.0 pts (single value) on average
+    - xPts = actual_pts + (expected_hits - actual_hits) * avg_hit_value
+
+    Returns None if Statcast data is insufficient.
+    """
+    hit_luck = statcast_metrics.get("hit_luck")
+    if hit_luck is None:
+        return None
+    # Average single is worth 1.0 pts in this scoring system
+    # (actual XBH distribution is already captured in actual_pts)
+    avg_hit_value = 1.0
+    return round(actual_pts - hit_luck * avg_hit_value, 1)
+
+
 def format_batter_line(stats: dict) -> str:
     """Format traditional batter stat line: 2-for-4, HR, 2 RBI, R, BB, K"""
     h = int(stats.get("h", 0))

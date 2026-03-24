@@ -216,9 +216,18 @@ def compute_batter_metrics(statcast_df: pd.DataFrame) -> dict:
         if "launch_speed" in bbe.columns:
             hard_hit = bbe[bbe["launch_speed"] >= 95]
             metrics["hard_hit_pct"] = _safe_round(len(hard_hit) / len(bbe) * 100)
-        # xBA
+        # xBA and expected hits
         if "estimated_ba_using_speedangle" in bbe.columns:
-            metrics["xBA"] = _safe_round(bbe["estimated_ba_using_speedangle"].mean(), 3)
+            xba_values = bbe["estimated_ba_using_speedangle"].dropna()
+            metrics["xBA"] = _safe_round(xba_values.mean(), 3)
+            if len(xba_values) > 0:
+                expected_hits = float(xba_values.sum())
+                actual_hits = len(bbe[bbe["events"].isin([
+                    "single", "double", "triple", "home_run",
+                ]) if "events" in bbe.columns else []])
+                metrics["expected_hits"] = round(expected_hits, 1)
+                metrics["actual_hits"] = actual_hits
+                metrics["hit_luck"] = round(actual_hits - expected_hits, 1)
         if "estimated_woba_using_speedangle" in bbe.columns:
             metrics["xwOBA"] = _safe_round(bbe["estimated_woba_using_speedangle"].mean(), 3)
     # Plate discipline
