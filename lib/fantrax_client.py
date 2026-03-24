@@ -131,6 +131,16 @@ class FantraxClient:
                     if tooltip and len(tooltip) > 20:
                         news_notes.append(tooltip)
 
+                # Extract opponent/game info from cells
+                opp_idx = next(
+                    (i for i, h in enumerate(header_cells) if h.get("key") == "opponent"),
+                    None,
+                )
+                opponent = ""
+                if opp_idx is not None and opp_idx < len(row.get("cells", [])):
+                    c = row["cells"][opp_idx]
+                    opponent = c.get("content", "") if isinstance(c, dict) else str(c)
+
                 player = {
                     "fantrax_id": scorer.get("scorerId", ""),
                     "name": name,
@@ -140,6 +150,8 @@ class FantraxClient:
                     "status": row.get("statusId", ""),
                     "is_pitcher": is_pitcher_table,
                     "news": news_notes,
+                    "opponent": opponent,
+                    "lineup_status": _STATUS_MAP.get(str(row.get("statusId", "")), "unknown"),
                 }
                 # Map cell values to stat names
                 cells = row.get("cells", [])
@@ -190,6 +202,9 @@ _TEAM_ABBREVS = {
     "Seattle Mariners": "SEA", "St. Louis Cardinals": "STL", "Tampa Bay Rays": "TB",
     "Texas Rangers": "TEX", "Toronto Blue Jays": "TOR", "Washington Nationals": "WSH",
 }
+
+
+_STATUS_MAP = {"1": "active", "2": "bench", "3": "IL", "9": "minors"}
 
 
 def _team_abbrev(team_name: str) -> str:

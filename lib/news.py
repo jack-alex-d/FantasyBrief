@@ -32,14 +32,37 @@ def fetch_rotowire_news(hours_back: int = 24) -> list[dict]:
 
 
 def filter_news_for_players(news_items: list[dict], player_names: list[str]) -> list[dict]:
-    """Filter news items to only those mentioning rostered players."""
+    """Filter news items to only those mentioning rostered players.
+
+    Uses first name initial + last name to avoid false positives
+    (e.g., 'Wenceel Perez' matching 'Eury Perez').
+    RotoWire titles use format 'First Last: headline', so we match against that.
+    """
     relevant = []
     for item in news_items:
-        text = (item["title"] + " " + item["summary"]).lower()
+        title = item.get("title", "")
+        text = (title + " " + item.get("summary", "")).lower()
+
         for name in player_names:
-            last_name = name.split()[-1].lower() if name.split() else ""
-            if last_name and len(last_name) > 2 and last_name in text:
-                item["matched_player"] = name
+            parts = name.split()
+            if len(parts) < 2:
+                continue
+            first = parts[0].lower()
+            last = parts[-1].lower()
+            if len(last) <= 2:
+                continue
+
+            # RotoWire titles start with "First Last:" -- check that first
+            title_lower = title.lower()
+            if title_lower.startswith(f"{first} {last}") or title_lower.startswith(f"{first[0]}. {last}"):
+                item = {**item, "matched_player": name}
+                relevant.append(item)
+                break
+
+            # Fallback: check if both first name and last name appear near each other
+            # Require full first name (not just initial) to avoid false positives
+            if last in text and first in text:
+                item = {**item, "matched_player": name}
                 relevant.append(item)
                 break
     return relevant

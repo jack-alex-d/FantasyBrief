@@ -42,6 +42,7 @@ def build_brief(
     lines.append("=" * 70)
     lines.append("")
 
+    lines.extend(_build_roster_alerts(roster))
     lines.extend(_build_scoring_summary(scoring_data))
     lines.extend(_build_hitter_section(roster, box_scores, batter_statcast))
     lines.extend(_build_pitcher_section(roster, box_scores, pitcher_statcast))
@@ -72,6 +73,43 @@ def _build_scoring_summary(scoring_data: dict) -> list[str]:
         if period_stats:
             for stat, value in period_stats.items():
                 lines.append(f"  {stat}: {value}")
+    lines.append("")
+    return lines
+
+
+# ---------------------------------------------------------------------------
+# ROSTER ALERTS
+# ---------------------------------------------------------------------------
+
+def _build_roster_alerts(roster: list[dict]) -> list[str]:
+    """Flag roster issues: benched players with games, active players without games."""
+    import re
+    alerts = []
+
+    for p in roster:
+        name = p.get("name", "")
+        status = p.get("lineup_status", "")
+        opp_raw = p.get("opponent", "")
+        has_game = bool(opp_raw and opp_raw.strip())
+        # Clean opponent string (strip HTML like <br/>)
+        opp_clean = re.sub(r"<[^>]+>", " ", opp_raw).strip() if opp_raw else ""
+
+        if status == "bench" and has_game:
+            alerts.append(("BENCH", name, opp_clean, p.get("position", "")))
+        elif status == "active" and not has_game and not p.get("is_pitcher"):
+            # Only flag hitters -- pitchers without a start today is normal
+            pass  # Too noisy for daily brief (off-days are common)
+
+    if not alerts:
+        return []
+
+    lines = []
+    lines.append("-" * 70)
+    lines.append("  ROSTER ALERTS")
+    lines.append("-" * 70)
+    for alert_type, name, opp, pos in alerts:
+        if alert_type == "BENCH":
+            lines.append(f"  ** {name} ({pos}) is on your BENCH but has a game: {opp}")
     lines.append("")
     return lines
 

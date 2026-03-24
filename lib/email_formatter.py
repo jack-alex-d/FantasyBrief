@@ -52,6 +52,7 @@ def brief_to_html(
 
     sections = []
     sections.append(_html_header(team_name, target_date))
+    sections.append(_html_roster_alerts(roster))
     sections.append(_html_hitters(roster, box_scores, batter_statcast))
     sections.append(_html_pitchers(roster, box_scores, pitcher_statcast))
     sections.append(_html_milb(roster, box_scores, milb_stats))
@@ -91,6 +92,7 @@ def brief_to_html(
   .news-item {{ margin-bottom: 10px; font-size: 14px; line-height: 1.5; }}
   .news-player {{ font-weight: 600; color: #1a3a5c; }}
   .news-text {{ color: #444; }}
+  .alert {{ background: #fde8e8; border-left: 3px solid #dc3545; padding: 8px 12px; margin-bottom: 6px; font-size: 13px; border-radius: 2px; font-weight: 500; }}
   .injury {{ background: #fff3cd; border-left: 3px solid #ffc107; padding: 8px 12px; margin-bottom: 6px; font-size: 13px; border-radius: 2px; }}
   .injury-name {{ font-weight: 600; }}
   .matchup {{ font-size: 14px; margin-bottom: 8px; }}
@@ -114,6 +116,29 @@ def _html_header(team_name: str, target_date: date) -> str:
   <h1>{_esc(team_name)} -- Daily Brief</h1>
   <div class="date">{target_date.strftime('%A, %B %d, %Y')}</div>
 </div>"""
+
+
+def _html_roster_alerts(roster: list[dict]) -> str:
+    import re
+    alerts = []
+    for p in roster:
+        status = p.get("lineup_status", "")
+        opp_raw = p.get("opponent", "")
+        has_game = bool(opp_raw and opp_raw.strip())
+        opp_clean = re.sub(r"<[^>]+>", " ", opp_raw).strip() if opp_raw else ""
+        if status == "bench" and has_game:
+            alerts.append((p.get("name", ""), p.get("position", ""), opp_clean))
+    if not alerts:
+        return ""
+    items = "".join(
+        f'<div class="alert">** {_esc(name)} ({_esc(pos)}) is on your BENCH but has a game: {_esc(opp)}</div>'
+        for name, pos, opp in alerts
+    )
+    return f"""<div class="section">
+  <div class="section-title">Roster Alerts</div>
+  {items}
+</div>
+<hr class="divider">"""
 
 
 def _html_hitters(roster: list[dict], box_scores: dict, statcast: dict) -> str:
