@@ -156,7 +156,7 @@ def _html_roster_alerts(roster: list[dict]) -> str:
         opp_raw = p.get("opponent", "")
         has_game = bool(opp_raw and opp_raw.strip())
         opp_clean = re.sub(r"<[^>]+>", " ", opp_raw).strip() if opp_raw else ""
-        if status == "bench" and has_game:
+        if status == "bench" and has_game and not p.get("in_minors") and not p.get("is_injured"):
             alerts.append((p.get("name", ""), p.get("position", ""), opp_clean))
     if not alerts:
         return ""

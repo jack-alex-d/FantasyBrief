@@ -129,7 +129,7 @@ def _build_roster_alerts(roster: list[dict]) -> list[str]:
         # Clean opponent string (strip HTML like <br/>)
         opp_clean = re.sub(r"<[^>]+>", " ", opp_raw).strip() if opp_raw else ""
 
-        if status == "bench" and has_game:
+        if status == "bench" and has_game and not p.get("in_minors") and not p.get("is_injured"):
             alerts.append(("BENCH", name, opp_clean, p.get("position", "")))
         elif status == "active" and not has_game and not p.get("is_pitcher"):
             # Only flag hitters -- pitchers without a start today is normal

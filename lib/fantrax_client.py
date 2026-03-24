@@ -123,11 +123,18 @@ class FantraxClient:
                 # Extract team abbreviation from teamName
                 team_short = _team_abbrev(team_name)
 
-                # Extract news/notes from icons
+                # Extract news/notes and flags from icons
                 icons = scorer.get("icons", [])
                 news_notes = []
+                in_minors = False
+                is_injured = False
                 for icon in icons:
                     tooltip = icon.get("tooltip", "")
+                    type_id = icon.get("typeId", "")
+                    if tooltip == "Minor Leagues" or type_id == "4":
+                        in_minors = True
+                    if tooltip == "Injured" or type_id == "30":
+                        is_injured = True
                     if tooltip and len(tooltip) > 20:
                         news_notes.append(tooltip)
 
@@ -152,6 +159,8 @@ class FantraxClient:
                     "news": news_notes,
                     "opponent": opponent,
                     "lineup_status": _STATUS_MAP.get(str(row.get("statusId", "")), "unknown"),
+                    "in_minors": in_minors,
+                    "is_injured": is_injured,
                 }
                 # Map cell values to stat names
                 cells = row.get("cells", [])
