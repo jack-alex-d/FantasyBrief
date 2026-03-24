@@ -30,6 +30,7 @@ from lib.mlb_data import (
 )
 from lib.news import fetch_rotowire_news, filter_news_for_players
 from lib.brief_builder import build_brief
+from lib.email_formatter import brief_to_html
 
 
 def main():
@@ -206,31 +207,64 @@ def main():
     print(f"\nBrief written to: {filename}")
     print(f"({len(brief_text)} characters, {brief_text.count(chr(10))} lines)")
 
-    # Send email if requested
+    # Build HTML version + send email if requested
     if send_email:
-        _send_email(brief_text, team_name, target_date)
+        # Collect the news data that brief_builder computed
+        from lib.brief_builder import _is_recent_news, _is_injury_flag, _parse_news_time
+        fantrax_news_for_email = []
+        injury_flags_for_email = []
+        rss_covered = {item.get("matched_player", "") for item in relevant_news}
+        for p in roster:
+            pname = p.get("name", "?")
+            if pname in rss_covered:
+                continue
+            for note in p.get("news", []):
+                if _is_recent_news(note, target_date):
+                    fantrax_news_for_email.append((pname, note))
+                elif _is_injury_flag(note):
+                    pass  # collected below
+        for p in roster:
+            for note in p.get("news", []):
+                if _is_injury_flag(note):
+                    injury_flags_for_email.append((p.get("name", "?"), note))
+
+        html_text = brief_to_html(
+            team_name=team_name,
+            roster=roster,
+            box_scores=box_scores,
+            batter_statcast=batter_statcast,
+            pitcher_statcast=pitcher_statcast,
+            milb_stats=milb_stats,
+            news_items=relevant_news,
+            transactions=transactions,
+            probable_pitchers=probables,
+            target_date=target_date,
+            fantrax_news=fantrax_news_for_email,
+            injury_flags=injury_flags_for_email,
+        )
+        _send_email(brief_text, html_text, team_name, target_date)
 
     print()
     print(brief_text)
 
 
-def _send_email(brief_text: str, team_name: str, target_date: date):
+def _send_email(plain_text: str, html_text: str, team_name: str, target_date: date):
     """Send the brief via Resend API (or SMTP fallback)."""
     email_to = os.getenv("EMAIL_TO", "")
     resend_key = os.getenv("RESEND_API_KEY", "")
 
     if resend_key and email_to:
-        _send_via_resend(brief_text, team_name, target_date, resend_key, email_to)
+        _send_via_resend(plain_text, html_text, team_name, target_date, resend_key, email_to)
     elif os.getenv("SMTP_HOST") and email_to:
-        _send_via_smtp(brief_text, team_name, target_date, email_to)
+        _send_via_smtp(plain_text, html_text, team_name, target_date, email_to)
     else:
         print("\n  Email not configured. Add to .env:")
         print("    RESEND_API_KEY=re_xxxxx")
         print("    EMAIL_TO=you@gmail.com")
 
 
-def _send_via_resend(brief_text: str, team_name: str, target_date: date, api_key: str, email_to: str):
-    """Send via Resend API."""
+def _send_via_resend(plain_text: str, html_text: str, team_name: str, target_date: date, api_key: str, email_to: str):
+    """Send via Resend API with HTML."""
     import resend
     resend.api_key = api_key
 
@@ -244,17 +278,19 @@ def _send_via_resend(brief_text: str, team_name: str, target_date: date, api_key
             "from": email_from,
             "to": recipients,
             "subject": subject,
-            "text": brief_text,
+            "html": html_text,
+            "text": plain_text,
         })
         print("  Email sent!")
     except Exception as e:
         print(f"  Email failed: {e}")
 
 
-def _send_via_smtp(brief_text: str, team_name: str, target_date: date, email_to: str):
-    """Fallback: send via SMTP."""
+def _send_via_smtp(plain_text: str, html_text: str, team_name: str, target_date: date, email_to: str):
+    """Fallback: send via SMTP with HTML."""
     import smtplib
     import ssl
+    from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
 
     smtp_host = os.getenv("SMTP_HOST", "")
@@ -264,10 +300,12 @@ def _send_via_smtp(brief_text: str, team_name: str, target_date: date, email_to:
     email_from = os.getenv("EMAIL_FROM", smtp_user)
 
     subject = f"Fantasy Brief: {team_name} -- {target_date.strftime('%b %d, %Y')}"
-    msg = MIMEText(brief_text, "plain")
+    msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = email_from
     msg["To"] = email_to
+    msg.attach(MIMEText(plain_text, "plain"))
+    msg.attach(MIMEText(html_text, "html"))
 
     try:
         print(f"\nSending email to {email_to}...")
