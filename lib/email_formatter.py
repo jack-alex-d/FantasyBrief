@@ -426,12 +426,16 @@ def _metric_class(key: str, val: float, thresholds: dict) -> str:
 def _batter_sort_score(box: dict) -> float:
     s = box.get("stats", {})
     try:
+        h = int(s.get("h", 0))
+        doubles = int(s.get("doubles", 0))
+        triples = int(s.get("triples", 0))
+        hr = int(s.get("hr", 0))
+        singles = h - doubles - triples - hr
         return (
-            int(s.get("h", 0)) * 1 + int(s.get("doubles", 0)) * 1
-            + int(s.get("triples", 0)) * 2 + int(s.get("hr", 0)) * 3
-            + int(s.get("rbi", 0)) * 1 + int(s.get("r", 0)) * 1
-            + int(s.get("bb", 0)) * 0.5 + int(s.get("sb", 0)) * 2
-            - int(s.get("k", 0)) * 0.5
+            singles * 1.0 + doubles * 2.0 + triples * 3.0 + hr * 4.0
+            + int(s.get("rbi", 0)) * 1.0 + int(s.get("r", 0)) * 1.0
+            + int(s.get("bb", 0)) * 1.0 + int(s.get("hbp", 0)) * 1.0
+            + int(s.get("sb", 0)) * 2.0 - int(s.get("k", 0)) * 0.5
         )
     except (ValueError, TypeError):
         return 0
@@ -440,12 +444,12 @@ def _batter_sort_score(box: dict) -> float:
 def _pitcher_sort_score(box: dict) -> float:
     s = box.get("stats", {})
     try:
+        note = s.get("note", "")
         return (
-            float(s.get("ip", 0)) * 3 + int(s.get("k", 0)) * 1
-            - int(s.get("er", 0)) * 2 - int(s.get("bb", 0)) * 0.5
-            - int(s.get("h", 0)) * 0.5
-            + (5 if "W" in s.get("note", "") else 0)
-            - (3 if "L" in s.get("note", "") else 0)
+            float(s.get("ip", 0)) * 3.0 + int(s.get("k", 0)) * 1.0
+            - int(s.get("er", 0)) * 2.0 - int(s.get("h", 0)) * 1.0
+            - int(s.get("bb", 0)) * 1.0
+            + (3.0 if "W" in note else 0) - (3.0 if "L" in note else 0)
         )
     except (ValueError, TypeError):
         return 0

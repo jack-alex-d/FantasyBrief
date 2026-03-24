@@ -556,18 +556,28 @@ def _build_matchup_preview(probable_pitchers: list[dict], roster: list[dict]) ->
 # ---------------------------------------------------------------------------
 
 def _batter_sort_score(box: dict) -> float:
-    """Rough fantasy point estimate for sorting hitters (best performance first)."""
+    """Fantasy point estimate for sorting hitters using league scoring.
+
+    Scoring: 1B=1, 2B=2, 3B=3, HR=4, RBI=1, R=1, BB=1, HBP=1,
+    SB=2, CS=-1, SO=-0.5, GIDP=-0.5, E=-0.5
+    """
     s = box.get("stats", {})
     try:
+        h = int(s.get("h", 0))
+        doubles = int(s.get("doubles", 0))
+        triples = int(s.get("triples", 0))
+        hr = int(s.get("hr", 0))
+        singles = h - doubles - triples - hr
         return (
-            int(s.get("h", 0)) * 1
-            + int(s.get("doubles", 0)) * 1
-            + int(s.get("triples", 0)) * 2
-            + int(s.get("hr", 0)) * 3
-            + int(s.get("rbi", 0)) * 1
-            + int(s.get("r", 0)) * 1
-            + int(s.get("bb", 0)) * 0.5
-            + int(s.get("sb", 0)) * 2
+            singles * 1.0
+            + doubles * 2.0
+            + triples * 3.0
+            + hr * 4.0
+            + int(s.get("rbi", 0)) * 1.0
+            + int(s.get("r", 0)) * 1.0
+            + int(s.get("bb", 0)) * 1.0
+            + int(s.get("hbp", 0)) * 1.0
+            + int(s.get("sb", 0)) * 2.0
             - int(s.get("k", 0)) * 0.5
         )
     except (ValueError, TypeError):
@@ -575,18 +585,24 @@ def _batter_sort_score(box: dict) -> float:
 
 
 def _pitcher_sort_score(box: dict) -> float:
-    """Rough fantasy point estimate for sorting pitchers (best performance first)."""
+    """Fantasy point estimate for sorting pitchers using league scoring.
+
+    Scoring: IP=3, K=1, W=3, QS=2, SV=4, HLD=1, IRS=1,
+    ER=-2, H=-1, BB=-1, L=-3, BS=-1, HB=-1, BK=-0.5
+    """
     s = box.get("stats", {})
     try:
         ip = float(s.get("ip", 0))
+        note = s.get("note", "")
         return (
-            ip * 3
-            + int(s.get("k", 0)) * 1
-            - int(s.get("er", 0)) * 2
-            - int(s.get("bb", 0)) * 0.5
-            - int(s.get("h", 0)) * 0.5
-            + (5 if "W" in s.get("note", "") else 0)
-            - (3 if "L" in s.get("note", "") else 0)
+            ip * 3.0
+            + int(s.get("k", 0)) * 1.0
+            - int(s.get("er", 0)) * 2.0
+            - int(s.get("h", 0)) * 1.0
+            - int(s.get("bb", 0)) * 1.0
+            - int(s.get("hr", 0)) * 0  # HR allowed not in scoring
+            + (3.0 if "W" in note else 0)
+            - (3.0 if "L" in note else 0)
         )
     except (ValueError, TypeError):
         return 0
