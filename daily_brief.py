@@ -11,11 +11,8 @@ Usage:
     python daily_brief.py 2026-03-22 --email
 """
 import os
-import smtplib
-import ssl
 import sys
 from datetime import date, datetime, timedelta
-from email.mime.text import MIMEText
 
 from dotenv import load_dotenv
 
@@ -218,23 +215,53 @@ def main():
 
 
 def _send_email(brief_text: str, team_name: str, target_date: date):
-    """Send the brief via SMTP email."""
+    """Send the brief via Resend API (or SMTP fallback)."""
+    email_to = os.getenv("EMAIL_TO", "")
+    resend_key = os.getenv("RESEND_API_KEY", "")
+
+    if resend_key and email_to:
+        _send_via_resend(brief_text, team_name, target_date, resend_key, email_to)
+    elif os.getenv("SMTP_HOST") and email_to:
+        _send_via_smtp(brief_text, team_name, target_date, email_to)
+    else:
+        print("\n  Email not configured. Add to .env:")
+        print("    RESEND_API_KEY=re_xxxxx")
+        print("    EMAIL_TO=you@gmail.com")
+
+
+def _send_via_resend(brief_text: str, team_name: str, target_date: date, api_key: str, email_to: str):
+    """Send via Resend API."""
+    import resend
+    resend.api_key = api_key
+
+    email_from = os.getenv("EMAIL_FROM", "FantasyBrief <onboarding@resend.dev>")
+    subject = f"Fantasy Brief: {team_name} -- {target_date.strftime('%b %d, %Y')}"
+    recipients = [addr.strip() for addr in email_to.split(",")]
+
+    try:
+        print(f"\nSending email to {email_to}...")
+        resend.Emails.send({
+            "from": email_from,
+            "to": recipients,
+            "subject": subject,
+            "text": brief_text,
+        })
+        print("  Email sent!")
+    except Exception as e:
+        print(f"  Email failed: {e}")
+
+
+def _send_via_smtp(brief_text: str, team_name: str, target_date: date, email_to: str):
+    """Fallback: send via SMTP."""
+    import smtplib
+    import ssl
+    from email.mime.text import MIMEText
+
     smtp_host = os.getenv("SMTP_HOST", "")
     smtp_port = int(os.getenv("SMTP_PORT", "587"))
     smtp_user = os.getenv("SMTP_USER", "")
     smtp_pass = os.getenv("SMTP_PASS", "")
     email_from = os.getenv("EMAIL_FROM", smtp_user)
-    email_to = os.getenv("EMAIL_TO", "")
-
-    if not all([smtp_host, smtp_user, smtp_pass, email_to]):
-        print("\n  Email not configured. Add to .env:")
-        print("    SMTP_HOST=smtp.gmail.com")
-        print("    SMTP_PORT=587")
-        print("    SMTP_USER=you@gmail.com")
-        print("    SMTP_PASS=your-app-password")
-        print("    EMAIL_FROM=you@gmail.com")
-        print("    EMAIL_TO=you@gmail.com")
-        return
 
     subject = f"Fantasy Brief: {team_name} -- {target_date.strftime('%b %d, %Y')}"
     msg = MIMEText(brief_text, "plain")

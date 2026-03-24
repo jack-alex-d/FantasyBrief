@@ -64,18 +64,34 @@ Add `--email` to send the brief to your inbox:
 python daily_brief.py --email
 ```
 
-Configure SMTP in your `.env` (the setup script will walk you through this):
+Email is powered by [Resend](https://resend.com) (free, 100 emails/day). No personal email password needed -- just an API key. The setup script walks you through this, or add manually to `.env`:
 
 ```
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=you@gmail.com
-SMTP_PASS=your-app-password
-EMAIL_FROM=you@gmail.com
+RESEND_API_KEY=re_xxxxx
 EMAIL_TO=you@gmail.com,friend@gmail.com
 ```
 
-Works with any SMTP provider -- Gmail, Outlook, Fastmail, your own server, etc. For Gmail, use an [App Password](https://myaccount.google.com/apppasswords).
+SMTP is also supported as a fallback (add `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` to `.env`).
+
+### Automated Daily Runs
+
+The setup script can schedule the brief to run every day at 10 AM automatically:
+
+- **macOS**: Uses `launchd` -- runs even if your Mac was asleep at 10 AM (catches up when it wakes). Survives reboots.
+- **Linux**: Provides a cron command to add to your crontab.
+
+To manage the schedule manually:
+
+```bash
+# Stop the daily schedule
+launchctl unload ~/Library/LaunchAgents/com.fantasybrief.daily.plist
+
+# Restart it
+launchctl load ~/Library/LaunchAgents/com.fantasybrief.daily.plist
+
+# Check if it's loaded
+launchctl list | grep fantasybrief
+```
 
 ## Requirements
 
