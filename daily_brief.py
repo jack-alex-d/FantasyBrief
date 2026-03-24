@@ -12,6 +12,7 @@ Usage:
 """
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta
 
 from dotenv import load_dotenv
@@ -21,7 +22,7 @@ from lib.mlb_data import (
     compute_batter_metrics,
     compute_pitcher_metrics,
     get_all_player_box_scores,
-    get_milb_player_stats,
+    get_milb_player_stats_batch,
     get_statcast_batter_day,
     get_statcast_pitcher_day,
     get_todays_probable_pitchers,
@@ -31,6 +32,7 @@ from lib.mlb_data import (
 from lib.news import fetch_rotowire_news, filter_news_for_players
 from lib.brief_builder import build_brief
 from lib.email_formatter import brief_to_html
+from lib.shared import is_hitter, is_pitcher
 
 
 def main():
@@ -105,59 +107,68 @@ def main():
         # Batch fetch all box score stat lines in one pass
         print(f"\n[3/6] Pulling box scores and Statcast for {len(player_names)} players...")
         print("  Scanning box scores...", end=" ", flush=True)
-        box_scores = get_all_player_box_scores(roster, target_date)
+        box_scores = get_all_player_box_scores(roster, games)
         played = [n for n, d in box_scores.items()]
         print(f"{len(box_scores)} players found in box scores")
 
         # Pull Statcast only for players who actually played
-        hitters = [p for p in roster if _is_hitter(p)]
-        pitchers = [p for p in roster if _is_pitcher(p)]
+        hitters = [p for p in roster if is_hitter(p)]
+        pitchers = [p for p in roster if is_pitcher(p)]
 
         hitters_who_played = [p for p in hitters if p.get("name") in box_scores]
         pitchers_who_played = [p for p in pitchers if p.get("name") in box_scores]
+        total_statcast = len(hitters_who_played) + len(pitchers_who_played)
+        print(f"  Fetching Statcast for {total_statcast} players (parallel)...")
 
-        for i, player in enumerate(hitters_who_played):
+        def _fetch_batter_statcast(player):
             name = player["name"]
-            person_id = box_scores.get(name, {}).get("person_id")
-            print(f"  Statcast {i+1}/{len(hitters_who_played)}: {name}...", end=" ", flush=True)
-            df = get_statcast_batter_day(name, target_date, mlbam_id=person_id)
+            pid = box_scores.get(name, {}).get("person_id")
+            df = get_statcast_batter_day(name, target_date, mlbam_id=pid)
             if not df.empty:
                 metrics = compute_batter_metrics(df)
                 if metrics:
-                    batter_statcast[name] = metrics
-                    print(f"OK ({metrics.get('pitches_seen', 0)} pitches)")
-                else:
-                    print("no batted balls")
-            else:
-                print("no Statcast")
+                    return name, "batter", metrics
+            return name, "batter", None
 
-        for i, player in enumerate(pitchers_who_played):
+        def _fetch_pitcher_statcast(player):
             name = player["name"]
-            person_id = box_scores.get(name, {}).get("person_id")
-            print(f"  Statcast {i+1}/{len(pitchers_who_played)}: {name}...", end=" ", flush=True)
-            df = get_statcast_pitcher_day(name, target_date, mlbam_id=person_id)
+            pid = box_scores.get(name, {}).get("person_id")
+            df = get_statcast_pitcher_day(name, target_date, mlbam_id=pid)
             if not df.empty:
                 metrics = compute_pitcher_metrics(df)
                 if metrics:
-                    pitcher_statcast[name] = metrics
-                    print(f"OK ({metrics.get('total_pitches', 0)} pitches)")
-                else:
-                    print("no data")
-            else:
-                print("no Statcast")
+                    return name, "pitcher", metrics
+            return name, "pitcher", None
 
-        # Check MiLB for players without MLB box score data
-        dnp_players = [p for p in hitters + pitchers if p.get("name") and p["name"] not in box_scores]
-        if dnp_players:
-            print(f"\n  Checking MiLB for {len(dnp_players)} players without MLB data...")
-            for player in dnp_players:
-                name = player.get("name", "")
-                if not name:
-                    continue
-                result = get_milb_player_stats(name, target_date)
-                if result:
-                    milb_stats[name] = result
-                    print(f"    {name}: Found {result['level']} data ({result['game']})")
+        with ThreadPoolExecutor(max_workers=5) as pool:
+            futures = []
+            for p in hitters_who_played:
+                futures.append(pool.submit(_fetch_batter_statcast, p))
+            for p in pitchers_who_played:
+                futures.append(pool.submit(_fetch_pitcher_statcast, p))
+
+            for future in as_completed(futures):
+                try:
+                    name, ptype, metrics = future.result(timeout=30)
+                    if metrics:
+                        if ptype == "batter":
+                            batter_statcast[name] = metrics
+                            print(f"    {name}: OK ({metrics.get('pitches_seen', 0)} pitches)")
+                        else:
+                            pitcher_statcast[name] = metrics
+                            print(f"    {name}: OK ({metrics.get('total_pitches', 0)} pitches)")
+                    else:
+                        print(f"    {name}: no Statcast")
+                except Exception as e:
+                    print(f"    Statcast error: {e}")
+
+        # Check MiLB for players without MLB box score data (batch, capped at 30 API calls)
+        dnp_names = [p["name"] for p in hitters + pitchers if p.get("name") and p["name"] not in box_scores]
+        if dnp_names:
+            print(f"\n  Checking MiLB for {len(dnp_names)} players (batch scan, max 30 games)...")
+            milb_stats = get_milb_player_stats_batch(dnp_names, target_date)
+            for name, data in milb_stats.items():
+                print(f"    {name}: Found {data['level']} data ({data['game']})")
     else:
         print("\n[3/6] Skipping stats (no games or no roster)")
 
@@ -355,24 +366,6 @@ def _send_via_smtp(plain_text: str, html_text: str, team_name: str, target_date:
         print("  Email sent!")
     except Exception as e:
         print(f"  Email failed: {e}")
-
-
-def _is_hitter(player: dict) -> bool:
-    if "is_pitcher" in player:
-        return not player["is_pitcher"]
-    pos = player.get("position", "").upper()
-    pitcher_positions = {"SP", "RP", "P", "CL"}
-    if not pos:
-        return True
-    return not any(p in pitcher_positions for p in pos.split(","))
-
-
-def _is_pitcher(player: dict) -> bool:
-    if "is_pitcher" in player:
-        return player["is_pitcher"]
-    pos = player.get("position", "").upper()
-    pitcher_positions = {"SP", "RP", "P", "CL"}
-    return any(p in pitcher_positions for p in pos.split(","))
 
 
 if __name__ == "__main__":

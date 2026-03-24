@@ -40,16 +40,13 @@ def get_box_score(game_pk: int) -> dict:
     return statsapi.boxscore_data(game_pk)
 
 
-def get_all_player_box_scores(roster: list[dict], target_date: date | None = None) -> dict[str, dict]:
+def get_all_player_box_scores(roster: list[dict], games: list[dict]) -> dict[str, dict]:
     """Batch lookup: scan all box scores once and return stats for matching players.
 
     Matches on last name + team to avoid false positives (e.g., different Dominguez).
-    Accepts roster dicts with 'name' and 'team_full' keys.
-    Returns dict of player_name -> {type, game, stats}.
+    Accepts roster dicts with 'name' and 'team_full' keys, and pre-fetched games list.
+    Returns dict of player_name -> {type, game, person_id, stats}.
     """
-    if target_date is None:
-        target_date = date.today() - timedelta(days=1)
-    games = get_yesterdays_games(target_date)
     results = {}
 
     # Build lookup: last_name -> [(roster_name, team_full), ...]
@@ -283,46 +280,77 @@ def compute_pitcher_metrics(statcast_df: pd.DataFrame) -> dict:
     return metrics
 
 
-def get_milb_player_stats(player_name: str, target_date: date | None = None) -> dict | None:
-    """Try to find a player's MiLB game stats from box scores."""
+def get_milb_player_stats_batch(player_names: list[str], target_date: date | None = None) -> dict[str, dict]:
+    """Batch-find MiLB game stats for a list of players.
+
+    Scans each MiLB level's schedule once, fetching box scores only for games
+    involving teams that haven't been checked yet. Caps total box score fetches
+    to avoid runaway API calls during the regular season.
+    """
     if target_date is None:
         target_date = date.today() - timedelta(days=1)
     date_str = target_date.strftime("%m/%d/%Y")
-    # Check AAA, AA, A+, A levels
+
+    # Build name lookup (same pattern as MLB box scores)
+    name_lookup: dict[str, list[str]] = {}
+    for name in player_names:
+        parts = name.lower().split()
+        if parts:
+            name_lookup.setdefault(parts[-1], []).append(name)
+
+    results = {}
+    box_fetches = 0
+    MAX_BOX_FETCHES = 30  # Safety cap
+
     for sport_id, level in [(11, "AAA"), (12, "AA"), (13, "A+"), (14, "A")]:
+        if box_fetches >= MAX_BOX_FETCHES:
+            break
         try:
             games = statsapi.schedule(date=date_str, sportId=sport_id)
         except Exception:
             continue
-        for game in games:
-            if game.get("status") != "Final":
-                continue
+        final_games = [g for g in games if g.get("status") == "Final"]
+        for game in final_games:
+            if box_fetches >= MAX_BOX_FETCHES:
+                break
             try:
-                box = statsapi.boxscore_data(game["game_id"])
+                box_fetches += 1
+                box = get_box_score(game["game_id"])
             except Exception:
                 continue
+            game_str = f"{game.get('away_name', '')} @ {game.get('home_name', '')}"
             for side in ["away", "home"]:
-                for batter_id in box.get(f"{side}Batters", []):
-                    if isinstance(batter_id, int):
-                        bdata = box.get(f"{side}BattingInfo", {}).get(str(batter_id), {})
-                        if bdata and _name_match(player_name, bdata.get("name", "")):
-                            return {
+                for batter in box.get(f"{side}Batters", []):
+                    if not isinstance(batter, dict) or batter.get("personId", 0) == 0:
+                        continue
+                    last = batter.get("name", "").lower().split()[-1] if batter.get("name") else ""
+                    if last not in name_lookup:
+                        continue
+                    for roster_name in name_lookup[last]:
+                        if roster_name not in results:
+                            results[roster_name] = {
                                 "type": "batter",
                                 "level": level,
-                                "game": f"{game['away_name']} @ {game['home_name']}",
-                                "stats": bdata,
+                                "game": game_str,
+                                "stats": batter,
                             }
-                for pitcher_id in box.get(f"{side}Pitchers", []):
-                    if isinstance(pitcher_id, int):
-                        pdata = box.get(f"{side}PitchingInfo", {}).get(str(pitcher_id), {})
-                        if pdata and _name_match(player_name, pdata.get("name", "")):
-                            return {
+                            break
+                for pitcher in box.get(f"{side}Pitchers", []):
+                    if not isinstance(pitcher, dict) or pitcher.get("personId", 0) == 0:
+                        continue
+                    last = pitcher.get("name", "").lower().split()[-1] if pitcher.get("name") else ""
+                    if last not in name_lookup:
+                        continue
+                    for roster_name in name_lookup[last]:
+                        if roster_name not in results:
+                            results[roster_name] = {
                                 "type": "pitcher",
                                 "level": level,
-                                "game": f"{game['away_name']} @ {game['home_name']}",
-                                "stats": pdata,
+                                "game": game_str,
+                                "stats": pitcher,
                             }
-    return None
+                            break
+    return results
 
 
 def get_todays_probable_pitchers(target_date: date | None = None) -> list[dict]:

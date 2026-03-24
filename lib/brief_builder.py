@@ -1,12 +1,14 @@
 """Builds the daily fantasy baseball brief text."""
 from datetime import date, datetime, timedelta, timezone
 
-_PITCHER_POSITIONS = {"SP", "RP", "P", "CL"}
-
-# News window: show news from this many hours before the brief's target date ends.
-# With a 10 AM ET run time, we want news from ~10 AM yesterday to ~10 AM today.
-# That's roughly: target_date 10:00 AM back 24 hours.
-NEWS_WINDOW_HOURS = 24
+from lib.shared import (
+    is_hitter,
+    is_pitcher,
+    batter_sort_score,
+    pitcher_sort_score,
+    format_batter_line,
+    format_pitcher_line,
+)
 
 
 def build_brief(
@@ -88,14 +90,14 @@ def _build_hitter_section(
     lines.append("  HITTER HIGHLIGHTS")
     lines.append("-" * 70)
 
-    hitters = [p for p in roster if _is_hitter(p)]
+    hitters = [p for p in roster if is_hitter(p)]
     if not hitters:
         lines.append("  No hitter data available.")
         lines.append("")
         return lines
 
     played = [p for p in hitters if p.get("name") in box_scores]
-    played.sort(key=lambda p: _batter_sort_score(box_scores.get(p.get("name", ""), {})), reverse=True)
+    played.sort(key=lambda p: batter_sort_score(box_scores.get(p.get("name", ""), {})), reverse=True)
     dnp = [p for p in hitters if p.get("name") not in box_scores]
 
     for player in played:
@@ -107,7 +109,7 @@ def _build_hitter_section(
         game = box.get("game", "")
 
         # Traditional stat line: 2-for-4, HR, 2 RBI, R, BB, K
-        stat_line = _format_batter_line(stats)
+        stat_line = format_batter_line(stats)
         lines.append(f"\n  {name} ({pos}, {team}) -- {game}")
         lines.append(f"    {stat_line}")
 
@@ -146,7 +148,7 @@ def _build_hitter_section(
     return lines
 
 
-def _format_batter_line(stats: dict) -> str:
+def format_batter_line(stats: dict) -> str:
     """Format traditional batter stat line: 2-for-4, HR, 2 RBI, R, BB, K"""
     h = int(stats.get("h", 0))
     ab = int(stats.get("ab", 0))
@@ -201,14 +203,14 @@ def _build_pitcher_section(
     lines.append("  PITCHER HIGHLIGHTS")
     lines.append("-" * 70)
 
-    pitchers = [p for p in roster if _is_pitcher(p)]
+    pitchers = [p for p in roster if is_pitcher(p)]
     if not pitchers:
         lines.append("  No pitcher data available.")
         lines.append("")
         return lines
 
     played = [p for p in pitchers if p.get("name") in box_scores]
-    played.sort(key=lambda p: _pitcher_sort_score(box_scores.get(p.get("name", ""), {})), reverse=True)
+    played.sort(key=lambda p: pitcher_sort_score(box_scores.get(p.get("name", ""), {})), reverse=True)
     dnp = [p for p in pitchers if p.get("name") not in box_scores]
 
     for player in played:
@@ -221,7 +223,7 @@ def _build_pitcher_section(
         note = stats.get("note", "")
 
         # Traditional line: 6.0 IP, 4 H, 2 ER, 1 BB, 9 K (92 pitches)
-        pitch_line = _format_pitcher_line(stats)
+        pitch_line = format_pitcher_line(stats)
         decision = f" {note}" if note else ""
         lines.append(f"\n  {name} ({pos}, {team}){decision} -- {game}")
         lines.append(f"    {pitch_line}")
@@ -260,7 +262,7 @@ def _build_pitcher_section(
     return lines
 
 
-def _format_pitcher_line(stats: dict) -> str:
+def format_pitcher_line(stats: dict) -> str:
     """Format traditional pitcher line: 6.0 IP, 4 H, 2 ER, 1 BB, 9 K (92 pitches)"""
     ip = stats.get("ip", "0")
     h = stats.get("h", "0")
@@ -551,74 +553,3 @@ def _build_matchup_preview(probable_pitchers: list[dict], roster: list[dict]) ->
     return lines
 
 
-# ---------------------------------------------------------------------------
-# HELPERS
-# ---------------------------------------------------------------------------
-
-def _batter_sort_score(box: dict) -> float:
-    """Fantasy point estimate for sorting hitters using league scoring.
-
-    Scoring: 1B=1, 2B=2, 3B=3, HR=4, RBI=1, R=1, BB=1, HBP=1,
-    SB=2, CS=-1, SO=-0.5, GIDP=-0.5, E=-0.5
-    """
-    s = box.get("stats", {})
-    try:
-        h = int(s.get("h", 0))
-        doubles = int(s.get("doubles", 0))
-        triples = int(s.get("triples", 0))
-        hr = int(s.get("hr", 0))
-        singles = h - doubles - triples - hr
-        return (
-            singles * 1.0
-            + doubles * 2.0
-            + triples * 3.0
-            + hr * 4.0
-            + int(s.get("rbi", 0)) * 1.0
-            + int(s.get("r", 0)) * 1.0
-            + int(s.get("bb", 0)) * 1.0
-            + int(s.get("hbp", 0)) * 1.0
-            + int(s.get("sb", 0)) * 2.0
-            - int(s.get("k", 0)) * 0.5
-        )
-    except (ValueError, TypeError):
-        return 0
-
-
-def _pitcher_sort_score(box: dict) -> float:
-    """Fantasy point estimate for sorting pitchers using league scoring.
-
-    Scoring: IP=3, K=1, W=3, QS=2, SV=4, HLD=1, IRS=1,
-    ER=-2, H=-1, BB=-1, L=-3, BS=-1, HB=-1, BK=-0.5
-    """
-    s = box.get("stats", {})
-    try:
-        ip = float(s.get("ip", 0))
-        note = s.get("note", "")
-        return (
-            ip * 3.0
-            + int(s.get("k", 0)) * 1.0
-            - int(s.get("er", 0)) * 2.0
-            - int(s.get("h", 0)) * 1.0
-            - int(s.get("bb", 0)) * 1.0
-            - int(s.get("hr", 0)) * 0  # HR allowed not in scoring
-            + (3.0 if "W" in note else 0)
-            - (3.0 if "L" in note else 0)
-        )
-    except (ValueError, TypeError):
-        return 0
-
-
-def _is_hitter(player: dict) -> bool:
-    if "is_pitcher" in player:
-        return not player["is_pitcher"]
-    pos = player.get("position", "").upper()
-    if not pos:
-        return True
-    return not any(p in _PITCHER_POSITIONS for p in pos.split(","))
-
-
-def _is_pitcher(player: dict) -> bool:
-    if "is_pitcher" in player:
-        return player["is_pitcher"]
-    pos = player.get("position", "").upper()
-    return any(p in _PITCHER_POSITIONS for p in pos.split(","))
