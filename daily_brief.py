@@ -7,10 +7,15 @@ to generate a comprehensive daily report for your fantasy team.
 Usage:
     python daily_brief.py              # Brief for yesterday
     python daily_brief.py 2026-03-22   # Brief for specific date
+    python daily_brief.py --email      # Brief for yesterday + send email
+    python daily_brief.py 2026-03-22 --email
 """
 import os
+import smtplib
+import ssl
 import sys
 from datetime import date, datetime, timedelta
+from email.mime.text import MIMEText
 
 from dotenv import load_dotenv
 
@@ -39,12 +44,16 @@ def main():
         print("Error: Set FANTRAX_LEAGUE_ID in .env")
         sys.exit(1)
 
-    # Parse optional date argument
-    if len(sys.argv) > 1:
+    # Parse arguments
+    args = [a for a in sys.argv[1:] if not a.startswith("-")]
+    flags = {a for a in sys.argv[1:] if a.startswith("-")}
+    send_email = "--email" in flags
+
+    if args:
         try:
-            target_date = datetime.strptime(sys.argv[1], "%Y-%m-%d").date()
+            target_date = datetime.strptime(args[0], "%Y-%m-%d").date()
         except ValueError:
-            print(f"Invalid date format: {sys.argv[1]}. Use YYYY-MM-DD.")
+            print(f"Invalid date format: {args[0]}. Use YYYY-MM-DD.")
             sys.exit(1)
     else:
         target_date = date.today() - timedelta(days=1)
@@ -199,9 +208,50 @@ def main():
 
     print(f"\nBrief written to: {filename}")
     print(f"({len(brief_text)} characters, {brief_text.count(chr(10))} lines)")
+
+    # Send email if requested
+    if send_email:
+        _send_email(brief_text, team_name, target_date)
+
     print()
-    # Also print to console
     print(brief_text)
+
+
+def _send_email(brief_text: str, team_name: str, target_date: date):
+    """Send the brief via SMTP email."""
+    smtp_host = os.getenv("SMTP_HOST", "")
+    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    smtp_user = os.getenv("SMTP_USER", "")
+    smtp_pass = os.getenv("SMTP_PASS", "")
+    email_from = os.getenv("EMAIL_FROM", smtp_user)
+    email_to = os.getenv("EMAIL_TO", "")
+
+    if not all([smtp_host, smtp_user, smtp_pass, email_to]):
+        print("\n  Email not configured. Add to .env:")
+        print("    SMTP_HOST=smtp.gmail.com")
+        print("    SMTP_PORT=587")
+        print("    SMTP_USER=you@gmail.com")
+        print("    SMTP_PASS=your-app-password")
+        print("    EMAIL_FROM=you@gmail.com")
+        print("    EMAIL_TO=you@gmail.com")
+        return
+
+    subject = f"Fantasy Brief: {team_name} -- {target_date.strftime('%b %d, %Y')}"
+    msg = MIMEText(brief_text, "plain")
+    msg["Subject"] = subject
+    msg["From"] = email_from
+    msg["To"] = email_to
+
+    try:
+        print(f"\nSending email to {email_to}...")
+        context = ssl.create_default_context()
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.starttls(context=context)
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(email_from, email_to.split(","), msg.as_string())
+        print("  Email sent!")
+    except Exception as e:
+        print(f"  Email failed: {e}")
 
 
 def _is_hitter(player: dict) -> bool:

@@ -56,6 +56,27 @@ python daily_brief.py 2026-04-15  # Brief for a specific date
 
 Briefs are saved to `output/brief_YYYY-MM-DD.txt` and also printed to the console.
 
+### Email Delivery
+
+Add `--email` to send the brief to your inbox:
+
+```bash
+python daily_brief.py --email
+```
+
+Configure SMTP in your `.env` (the setup script will walk you through this):
+
+```
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=you@gmail.com
+SMTP_PASS=your-app-password
+EMAIL_FROM=you@gmail.com
+EMAIL_TO=you@gmail.com,friend@gmail.com
+```
+
+Works with any SMTP provider -- Gmail, Outlook, Fastmail, your own server, etc. For Gmail, use an [App Password](https://myaccount.google.com/apppasswords).
+
 ## Requirements
 
 - Python 3.10+

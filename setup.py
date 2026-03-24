@@ -81,9 +81,31 @@ def main():
     else:
         league_id, team_name = _prompt_league_config()
 
+    # Optional email config
+    print("\n  -- Email delivery (optional) --")
+    setup_email = input("  Set up email delivery? [y/N] ").strip().lower()
+    email_lines = ""
+    if setup_email in ("y", "yes"):
+        smtp_host = input("  SMTP host (e.g. smtp.gmail.com): ").strip()
+        smtp_port = input("  SMTP port [587]: ").strip() or "587"
+        smtp_user = input("  SMTP username (your email): ").strip()
+        smtp_pass = input("  SMTP password (or app password): ").strip()
+        email_from = input(f"  Send from [{smtp_user}]: ").strip() or smtp_user
+        email_to = input("  Send to (comma-separated emails): ").strip()
+        email_lines = (
+            f"SMTP_HOST={smtp_host}\n"
+            f"SMTP_PORT={smtp_port}\n"
+            f"SMTP_USER={smtp_user}\n"
+            f"SMTP_PASS={smtp_pass}\n"
+            f"EMAIL_FROM={email_from}\n"
+            f"EMAIL_TO={email_to}\n"
+        )
+
     with open(ENV_FILE, "w") as f:
         f.write(f"FANTRAX_LEAGUE_ID={league_id}\n")
         f.write(f"FANTRAX_TEAM_NAME={team_name}\n")
+        if email_lines:
+            f.write(email_lines)
     print(f"  Saved to {ENV_FILE}")
 
     # Step 4: Fantrax login
@@ -126,6 +148,9 @@ def main():
     print()
     print("  Daily usage:")
     print("    source venv/bin/activate && python daily_brief.py")
+    print()
+    print("  With email delivery:")
+    print("    python daily_brief.py --email")
     print()
     print("  For a specific date:")
     print("    python daily_brief.py 2026-03-22")
