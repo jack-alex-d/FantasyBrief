@@ -40,6 +40,40 @@ def get_box_score(game_pk: int) -> dict:
     return statsapi.boxscore_data(game_pk)
 
 
+def get_detailed_player_stats(game_pk: int) -> dict[int, dict]:
+    """Get detailed per-player batting/fielding stats from the live feed.
+
+    Returns dict of personId -> {caughtStealing, groundIntoDoublePlay, errors, hitByPitch, ...}
+    These fields aren't in the standard boxscore_data wrapper.
+    """
+    try:
+        resp = requests.get(
+            f"https://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live",
+            timeout=10,
+        )
+        data = resp.json()
+    except Exception:
+        return {}
+
+    player_stats = {}
+    teams = data.get("liveData", {}).get("boxscore", {}).get("teams", {})
+    for side in ["away", "home"]:
+        players = teams.get(side, {}).get("players", {})
+        for pid_key, pdata in players.items():
+            pid = pdata.get("person", {}).get("id", 0)
+            if not pid:
+                continue
+            batting = pdata.get("stats", {}).get("batting", {})
+            fielding = pdata.get("stats", {}).get("fielding", {})
+            player_stats[pid] = {
+                "cs": batting.get("caughtStealing", 0),
+                "gidp": batting.get("groundIntoDoublePlay", 0),
+                "errors": fielding.get("errors", 0),
+                "hbp": batting.get("hitByPitch", 0),
+            }
+    return player_stats
+
+
 def get_all_player_box_scores(roster: list[dict], games: list[dict]) -> dict[str, dict]:
     """Batch lookup: scan all box scores once and return stats for matching players.
 
@@ -64,6 +98,8 @@ def get_all_player_box_scores(roster: list[dict], games: list[dict]) -> dict[str
             box = get_box_score(game["game_id"])
         except Exception:
             continue
+        # Fetch detailed stats for CS/GIDP/E
+        detailed = get_detailed_player_stats(game["game_id"])
         team_info = box.get("teamInfo", {})
         # Map side -> team name for matching
         side_teams = {
@@ -88,10 +124,12 @@ def get_all_player_box_scores(roster: list[dict], games: list[dict]) -> dict[str
                         continue
                     if roster_team and side_team and side_team not in roster_team and roster_team not in side_team:
                         continue
+                    pid = batter.get("personId")
+                    extra = detailed.get(pid, {})
                     results[roster_name] = {
                         "type": "batter",
                         "game": game_score,
-                        "person_id": batter.get("personId"),
+                        "person_id": pid,
                         "stats": {
                             "ab": batter.get("ab", "0"),
                             "h": batter.get("h", "0"),
@@ -104,7 +142,10 @@ def get_all_player_box_scores(roster: list[dict], games: list[dict]) -> dict[str
                             "k": batter.get("k", "0"),
                             "sb": batter.get("sb", "0"),
                             "avg": batter.get("avg", ""),
-                            "hbp": batter.get("hbp", "0"),
+                            "hbp": str(extra.get("hbp", batter.get("hbp", "0"))),
+                            "cs": str(extra.get("cs", 0)),
+                            "gidp": str(extra.get("gidp", 0)),
+                            "e": str(extra.get("errors", 0)),
                         },
                     }
                     break
