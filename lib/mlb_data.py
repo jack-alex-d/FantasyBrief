@@ -280,44 +280,81 @@ def compute_pitcher_metrics(statcast_df: pd.DataFrame) -> dict:
     return metrics
 
 
-def get_milb_player_stats_batch(player_names: list[str], target_date: date | None = None) -> dict[str, dict]:
-    """Batch-find MiLB game stats for a list of players.
+def _get_affiliate_team_ids(roster: list[dict]) -> set[int]:
+    """Get all MiLB team IDs affiliated with MLB orgs on the roster."""
+    # Collect unique MLB parent org names from roster
+    org_names = {p.get("team_full", "") for p in roster if p.get("team_full")}
+    if not org_names:
+        return set()
 
-    Scans each MiLB level's schedule once, fetching box scores only for games
-    involving teams that haven't been checked yet. Caps total box score fetches
-    to avoid runaway API calls during the regular season.
+    try:
+        resp = requests.get(
+            "https://statsapi.mlb.com/api/v1/teams",
+            params={"sportIds": "11,12,13,14,16", "season": date.today().year},
+            timeout=10,
+        )
+        teams = resp.json().get("teams", [])
+    except Exception:
+        return set()
+
+    affiliate_ids = set()
+    for team in teams:
+        parent = team.get("parentOrgName", "")
+        if parent in org_names:
+            affiliate_ids.add(team["id"])
+    return affiliate_ids
+
+
+def get_milb_player_stats_batch(
+    roster: list[dict],
+    player_names: list[str],
+    target_date: date | None = None,
+) -> dict[str, dict]:
+    """Batch-find MiLB game stats across all levels.
+
+    Efficient: fetches affiliate team IDs first, then only scans games involving
+    those teams. Covers AAA, AA, A+, A, and Rookie/Complex/DSL leagues.
     """
     if target_date is None:
         target_date = date.today() - timedelta(days=1)
     date_str = target_date.strftime("%m/%d/%Y")
 
-    # Build name lookup (same pattern as MLB box scores)
+    # Build name lookup
     name_lookup: dict[str, list[str]] = {}
     for name in player_names:
         parts = name.lower().split()
         if parts:
             name_lookup.setdefault(parts[-1], []).append(name)
 
-    results = {}
-    box_fetches = 0
-    MAX_BOX_FETCHES = 30  # Safety cap
+    if not name_lookup:
+        return {}
 
-    for sport_id, level in [(11, "AAA"), (12, "AA"), (13, "A+"), (14, "A")]:
-        if box_fetches >= MAX_BOX_FETCHES:
-            break
+    # Get affiliate team IDs so we only fetch relevant box scores
+    affiliate_ids = _get_affiliate_team_ids(roster)
+
+    results = {}
+    levels = [(11, "AAA"), (12, "AA"), (13, "A+"), (14, "A"), (16, "Rookie/Complex")]
+
+    for sport_id, level in levels:
         try:
             games = statsapi.schedule(date=date_str, sportId=sport_id)
         except Exception:
             continue
         final_games = [g for g in games if g.get("status") == "Final"]
+
         for game in final_games:
-            if box_fetches >= MAX_BOX_FETCHES:
-                break
+            # Skip games not involving our affiliates (if we have the mapping)
+            if affiliate_ids:
+                away_id = game.get("away_id", 0)
+                home_id = game.get("home_id", 0)
+                if away_id not in affiliate_ids and home_id not in affiliate_ids:
+                    continue
+
             try:
-                box_fetches += 1
                 box = get_box_score(game["game_id"])
             except Exception:
                 continue
+
             game_str = f"{game.get('away_name', '')} @ {game.get('home_name', '')}"
             for side in ["away", "home"]:
                 for batter in box.get(f"{side}Batters", []):

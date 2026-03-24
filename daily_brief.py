@@ -162,13 +162,16 @@ def main():
                 except Exception as e:
                     print(f"    Statcast error: {e}")
 
-        # Check MiLB for players without MLB box score data (batch, capped at 30 API calls)
+        # Check MiLB for players without MLB box score data
         dnp_names = [p["name"] for p in hitters + pitchers if p.get("name") and p["name"] not in box_scores]
         if dnp_names:
-            print(f"\n  Checking MiLB for {len(dnp_names)} players (batch scan, max 30 games)...")
-            milb_stats = get_milb_player_stats_batch(dnp_names, target_date)
-            for name, data in milb_stats.items():
-                print(f"    {name}: Found {data['level']} data ({data['game']})")
+            print(f"\n  Checking MiLB for {len(dnp_names)} players (affiliate-filtered scan)...")
+            milb_stats = get_milb_player_stats_batch(roster, dnp_names, target_date)
+            if milb_stats:
+                for name, data in milb_stats.items():
+                    print(f"    {name}: Found {data['level']} data ({data['game']})")
+            else:
+                print("    No MiLB games found")
     else:
         print("\n[3/6] Skipping stats (no games or no roster)")
 
