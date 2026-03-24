@@ -324,35 +324,47 @@ def _build_news_section(roster: list[dict], news_items: list[dict], target_date:
     lines.append("  NEWS & UPDATES")
     lines.append("-" * 70)
 
-    recent_news = []
     injury_flags = []
     for player in roster:
         for note in player.get("news", []):
-            if _is_recent_news(note, target_date):
-                recent_news.append((player.get("name", "?"), note, _parse_news_time(note)))
-            elif _is_injury_flag(note):
+            if _is_injury_flag(note):
                 injury_flags.append((player.get("name", "?"), note))
 
-    # Sort by time (most recent first)
-    recent_news.sort(key=lambda x: x[2] or "", reverse=True)
-
-    if recent_news:
-        for name, note, _ts in recent_news:
-            lines.append(f"  [{name}] {note}")
-
-    # RotoWire RSS news
+    # RotoWire RSS news (primary source -- full summaries)
+    rss_covered_players = set()
     if news_items:
-        if recent_news:
-            lines.append("")
-        for item in news_items[:10]:
+        for item in news_items[:15]:
             player = item.get("matched_player", "")
             title = item["title"]
             summary = item.get("summary", "")
             lines.append(f"  [{player}] {title}")
             if summary:
-                lines.append(f"    {summary}")
+                # Strip the "Visit RotoWire.com..." boilerplate
+                clean = summary.split("Visit RotoWire.com")[0].strip()
+                if clean:
+                    lines.append(f"    {clean}")
+            if player:
+                rss_covered_players.add(player)
 
-    if not recent_news and not news_items:
+    # Fantrax blurbs as fallback for players not covered by RSS
+    fantrax_news = []
+    for player in roster:
+        name = player.get("name", "?")
+        if name in rss_covered_players:
+            continue
+        for note in player.get("news", []):
+            if _is_recent_news(note, target_date):
+                fantrax_news.append((name, note, _parse_news_time(note)))
+
+    fantrax_news.sort(key=lambda x: x[2] or "", reverse=True)
+
+    if fantrax_news:
+        if news_items:
+            lines.append("")
+        for name, note, _ts in fantrax_news:
+            lines.append(f"  [{name}] {note}")
+
+    if not news_items and not fantrax_news:
         lines.append("  No relevant news for your roster today.")
 
     # Injury watch -- always shown if there are injuries
