@@ -6,6 +6,7 @@ from lib.shared import (
     is_pitcher,
     batter_sort_score,
     batter_expected_pts,
+    non_contact_pts,
     pitcher_sort_score,
     format_batter_line,
     format_pitcher_line,
@@ -190,17 +191,12 @@ def _html_hitters(roster: list[dict], box_scores: dict, statcast: dict) -> str:
         stat_line = format_batter_line(stats)
         pts = batter_sort_score(box)
         if "expected_contact_pts" in metrics:
-            nc = (
-                int(stats.get("r", 0)) * 1.0 + int(stats.get("rbi", 0)) * 1.0
-                + int(stats.get("bb", 0)) * 1.0 + int(stats.get("hbp", 0)) * 1.0
-                + int(stats.get("sb", 0)) * 2.0 - int(stats.get("k", 0)) * 0.5
-            )
-            metrics["non_contact_pts"] = nc
+            metrics["non_contact_pts"] = non_contact_pts(stats)
         xpts = batter_expected_pts(pts, metrics)
         pts_class = "pts-pos" if pts > 0 else ("pts-neg" if pts < 0 else "pts-zero")
         xpts_html = ""
-        if xpts is not None and abs(xpts - pts) >= 0.5:
-            xpts_class = "pts-pos" if xpts > pts else "pts-neg"
+        if xpts is not None:
+            xpts_class = "pts-pos" if xpts >= pts else "pts-neg"
             xpts_html = f' <span class="pts {xpts_class}" style="opacity:0.7">xPts: {xpts:+.1f}</span>'
         items.append(f"""<div class="player">
   <span class="player-name">{_esc(name)}</span><span class="pts {pts_class}">{pts:+.1f}</span>{xpts_html}

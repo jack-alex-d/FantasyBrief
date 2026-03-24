@@ -23,7 +23,8 @@ def batter_sort_score(box: dict) -> float:
     """Fantasy point estimate for sorting hitters using league scoring.
 
     Scoring: 1B=1, 2B=2, 3B=3, HR=4, RBI=1, R=1, BB=1, HBP=1,
-    SB=2, CS=-1, SO=-0.5, GIDP=-0.5, E=-0.5
+    SB=2, SO=-0.5. (CS=-1, GIDP=-0.5, E=-0.5 also in league scoring
+    but not available in MLB box score data.)
     """
     s = box.get("stats", {})
     try:
@@ -69,6 +70,18 @@ def pitcher_sort_score(box: dict) -> float:
         )
     except (ValueError, TypeError):
         return 0
+
+
+def non_contact_pts(stats: dict) -> float:
+    """Compute fantasy points from non-contact events (BB, K, HBP, SB, R, RBI)."""
+    return (
+        int(stats.get("r", 0)) * 1.0
+        + int(stats.get("rbi", 0)) * 1.0
+        + int(stats.get("bb", 0)) * 1.0
+        + int(stats.get("hbp", 0)) * 1.0
+        + int(stats.get("sb", 0)) * 2.0
+        - int(stats.get("k", 0)) * 0.5
+    )
 
 
 def batter_expected_pts(actual_pts: float, statcast_metrics: dict) -> float | None:

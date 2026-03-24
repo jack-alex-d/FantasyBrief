@@ -6,6 +6,7 @@ from lib.shared import (
     is_pitcher,
     batter_sort_score,
     batter_expected_pts,
+    non_contact_pts,
     pitcher_sort_score,
     format_batter_line,
     format_pitcher_line,
@@ -184,20 +185,11 @@ def _build_hitter_section(
         # xPts: replace only total bases with expected (xSLG sum), keep all else actual
         xpts = None
         if "expected_contact_pts" in metrics:
-            # Non-contact pts = everything except total bases
-            nc = (
-                int(stats.get("r", 0)) * 1.0
-                + int(stats.get("rbi", 0)) * 1.0
-                + int(stats.get("bb", 0)) * 1.0
-                + int(stats.get("hbp", 0)) * 1.0
-                + int(stats.get("sb", 0)) * 2.0
-                - int(stats.get("k", 0)) * 0.5
-            )
-            metrics["non_contact_pts"] = nc
+            metrics["non_contact_pts"] = non_contact_pts(stats)
             xpts = batter_expected_pts(pts, metrics)
 
         stat_line = format_batter_line(stats)
-        xpts_str = f", xPts: {xpts:+.1f}" if xpts is not None and abs(xpts - pts) >= 0.5 else ""
+        xpts_str = f", xPts: {xpts:+.1f}" if xpts is not None else ""
         lines.append(f"\n  {name} ({pos}, {team}) [{pts:+.1f} pts{xpts_str}] -- {game}")
         lines.append(f"    {stat_line}")
 
